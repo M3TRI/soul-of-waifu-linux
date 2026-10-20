@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en" data-accent="blue">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="theme-color" content="#0C0C10">
+    <title>Soul of Waifu — Web</title>
+    <link rel="manifest" href="/static/manifest.webmanifest">
+    <link rel="icon" href="/static/logotype.png">
+    <link rel="apple-touch-icon" href="/static/logotype.png">
+    <link rel="stylesheet" href="/static/style.css">
+
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+
+    <script src="https://cubism.live2d.com/sdk-web/cubismcore/live2dcubismcore.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/dylanNew/live2d/webgl/Live2D/lib/live2d.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/pixi.js@7.x/dist/pixi.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/pixi-live2d-display/dist/index.min.js"></script>
+
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://cdn.jsdelivr.net/npm/three@0.176.0/build/three.module.js",
+          "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.176.0/examples/jsm/",
+          "@pixiv/three-vrm": "https://cdn.jsdelivr.net/npm/@pixiv/three-vrm@3/lib/three-vrm.module.js",
+          "loadMixamo": "/vrm/modules/loadMixamoAnimation.js"
+        }
+      }
+    </script>
+</head>
+<body>
+    <header class="topbar">
+        <button class="icon-btn" id="chats-btn" title="Chats (Ctrl + /)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+        </button>
+
+        <div class="topbar-identity" id="topbar-identity">
+            <img id="char-avatar" class="avatar-circle" src="/static/logotype.png" alt="">
+            <div class="char-info">
+                <h2 id="char-name">Loading…</h2>
+                <p id="status-text" class="status-offline">Connecting…</p>
+            </div>
+        </div>
+
+        <div class="topbar-actions">
+            <button class="icon-btn" id="settings-btn" title="Settings">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+            </button>
+            <button class="icon-btn" id="menu-btn" title="Characters">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/></svg>
+            </button>
+        </div>
+    </header>
+
+    <div id="variables-bar" class="variables-bar hidden"></div>
+
+    <div id="main-content">
+        <button id="stage-collapse-btn" title="Show / hide stage">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="17 11 12 6 7 11"/><polyline points="17 18 12 13 7 18"/></svg>
+        </button>
+
+        <div id="avatar-container">
+            <canvas id="avatar-canvas"></canvas>
+            <img id="avatar-image" class="hidden" src="" alt="">
+
+            <button id="stage-fab" class="stage-fab hidden" title="Expressions &amp; animations">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg>
+            </button>
+
+            <div id="stage-panel" class="hidden">
+                <div class="panel-header">
+                    <h3>Stage — Expressions &amp; Animations</h3>
+                    <button id="stage-panel-close">&times;</button>
+                </div>
+                <div class="panel-sections">
+                    <div class="panel-section" id="section-expressions">
+                        <h4>Expressions</h4>
+                        <div id="panel-expressions" class="panel-scroll"></div>
+                    </div>
+                    <div class="panel-section" id="section-animations">
+                        <h4>Animations</h4>
+                        <div id="panel-animations" class="panel-scroll"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="chat-column">
+            <div id="chat-container"></div>
+            <button id="scroll-bottom-btn" class="scroll-fab hidden" title="Scroll to latest">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="6 9 12 15 18 9"/></svg>
+            </button>
+        </div>
+    </div>
+
+    <div id="typing-indicator" class="hidden">
+        <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+        <button id="stop-btn" title="Stop generation">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
+        </button>
+    </div>
+
+    <footer class="composer">
+        <div class="input-wrapper">
+            <button id="mic-btn" title="Voice input">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="22"/></svg>
+            </button>
+            <textarea id="msg-input" rows="1" placeholder="Write your message…" autocomplete="off"></textarea>
+            <button id="send-btn" title="Send">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+            </button>
+        </div>
+    </footer>
+
+    <div id="drawer-overlay" class="drawer-overlay hidden"></div>
+
+    <aside id="chats-drawer" class="drawer left">
+        <div class="drawer-header">
+            <h2>Chats</h2>
+            <button class="drawer-close" data-close="chats-drawer">&times;</button>
+        </div>
+        <div id="chats-list" class="drawer-body"></div>
+    </aside>
+
+    <aside id="characters-drawer" class="drawer right">
+        <div class="drawer-header">
+            <h2>Characters</h2>
+            <button class="drawer-close" data-close="characters-drawer">&times;</button>
+        </div>
+        <div class="drawer-search">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <input type="text" id="char-search" placeholder="Search characters…" autocomplete="off">
+        </div>
+        <div id="character-grid" class="drawer-body char-grid"></div>
+    </aside>
+
+    <aside id="settings-drawer" class="drawer right">
+        <div class="drawer-header">
+            <h2>Settings</h2>
+            <button class="drawer-close" data-close="settings-drawer">&times;</button>
+        </div>
+        <div class="drawer-body settings-body">
+
+            <div class="setting-group">
+                <h4>Accent color</h4>
+                <div class="accent-row" id="accent-row">
+                    <button class="accent-swatch" data-accent="blue"   style="--sw:#4BB8FF" title="Blue"></button>
+                    <button class="accent-swatch" data-accent="pink"   style="--sw:#F472B6" title="Pink"></button>
+                    <button class="accent-swatch" data-accent="violet" style="--sw:#A78BFA" title="Violet"></button>
+                    <button class="accent-swatch" data-accent="green"  style="--sw:#4ADE80" title="Green"></button>
+                    <button class="accent-swatch" data-accent="amber"  style="--sw:#FBBF24" title="Amber"></button>
+                    <button class="accent-swatch" data-accent="rose"   style="--sw:#FB7185" title="Rose"></button>
+                    <label class="accent-swatch custom-swatch" title="Custom color">
+                        <input type="color" id="accent-custom" value="#4BB8FF">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 21a9 9 0 1 1 9-9c0 1.66-1.34 3-3 3h-1.5a1.5 1.5 0 0 0-1.06 2.56A1.5 1.5 0 0 1 12 21z"/><circle cx="7.5" cy="10.5" r="1"/><circle cx="12" cy="7.5" r="1"/><circle cx="16.5" cy="10.5" r="1"/></svg>
+                    </label>
+                </div>
+            </div>
+
+            <div class="setting-group">
+                <h4>Appearance</h4>
+                <label class="switch-row">
+                    <span>OLED&nbsp;black background</span>
+                    <input type="checkbox" id="oled-toggle">
+                    <span class="switch"></span>
+                </label>
+                <div class="range-block">
+                    <div class="range-title">Text size</div>
+                    <input type="range" id="font-scale" min="85" max="130" step="5" value="100">
+                    <div class="range-hint"><span>A−</span><span>A+</span></div>
+                </div>
+                <div class="range-block">
+                    <div class="range-title">Chat column width</div>
+                    <input type="range" id="chatwidth-range" min="60" max="100" step="5" value="100">
+                    <div class="range-hint"><span>Narrow</span><span>Wide</span></div>
+                </div>
+                <div class="range-block">
+                    <div class="range-title">Wallpaper dimming</div>
+                    <input type="range" id="dim-range" min="30" max="95" step="1" value="72">
+                    <div class="range-hint"><span>Brighter</span><span>Darker</span></div>
+                </div>
+            </div>
+
+            <div class="setting-group">
+                <h4>Stage</h4>
+                <div class="range-block">
+                    <div class="range-title">Mobile stage height</div>
+                    <input type="range" id="stageheight-range" min="16" max="45" step="1" value="30">
+                    <div class="range-hint"><span>S</span><span>L</span></div>
+                </div>
+                <label class="switch-row">
+                    <span>Collapse stage now</span>
+                    <input type="checkbox" id="collapse-stage-toggle">
+                    <span class="switch"></span>
+                </label>
+            </div>
+
+            <div class="setting-group">
+                <h4>Sound</h4>
+                <label class="switch-row">
+                    <span>Message sounds</span>
+                    <input type="checkbox" id="sound-toggle" checked>
+                    <span class="switch"></span>
+                </label>
+                <label class="switch-row">
+                    <span>Voice playback (TTS)</span>
+                    <input type="checkbox" id="tts-toggle" checked>
+                    <span class="switch"></span>
+                </label>
+            </div>
+
+            <div class="setting-group">
+                <h4>Chat</h4>
+                <label class="switch-row">
+                    <span>Show avatars in messages</span>
+                    <input type="checkbox" id="avatars-toggle" checked>
+                    <span class="switch"></span>
+                </label>
+                <label class="switch-row">
+                    <span>Show timestamps</span>
+                    <input type="checkbox" id="timestamps-toggle" checked>
+                    <span class="switch"></span>
+                </label>
+                <label class="switch-row">
+                    <span>Reduce animations</span>
+                    <input type="checkbox" id="motion-toggle">
+                    <span class="switch"></span>
+                </label>
+            </div>
+
+            <p class="settings-note">Settings are stored on this device only.<br>Ctrl + / — chats · Esc — close panels</p>
+        </div>
+    </aside>
+
+    <div id="toast-container"></div>
+
+    <script type="module" src="/static/script.js"></script>
+</body>
+</html>

@@ -1,0 +1,13 @@
+# Large binary assets from the upstream release, kept on disk but out of git
+app/utils/e5-small-en-ru/
+app/utils/speech-to-text/
+app/utils/emotions/
+assets/
+app/font/
+app/gui/icons/
+app/utils/ai_clients/9b5ad71b2ce5302211f9c61530b329a4922fc6a4
+logs/
+app/cache/
+__pycache__/
+*.pyc
+.venv/
