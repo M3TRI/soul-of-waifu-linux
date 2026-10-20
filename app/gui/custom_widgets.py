@@ -1,5 +1,6 @@
 import os
 import re
+import sys
 import math
 import subprocess
 import logging
@@ -1912,7 +1913,12 @@ class ModelListItemWidget(QWidget):
  
     def on_open_file_location_clicked(self):
         try:
-            subprocess.Popen(["explorer", "/select,", os.path.abspath(self.full_path)])
+            if os.name == "nt":
+                subprocess.Popen(["explorer", "/select,", os.path.abspath(self.full_path)])
+            elif sys.platform == "darwin":
+                subprocess.Popen(["open", "-R", os.path.abspath(self.full_path)])
+            else:
+                subprocess.Popen(["xdg-open", os.path.dirname(os.path.abspath(self.full_path))])
         except Exception as e:
             parent_win = self.window() if hasattr(self, "window") else self
  
@@ -3324,7 +3330,7 @@ class SoulMemoryViewer(QtWidgets.QDialog):
         main_layout.addLayout(bottom_layout)
 
         self.btn_refresh.clicked.connect(self.refresh_memory)
-        self.btn_open_folder.clicked.connect(lambda: os.startfile(str(self.memory_dir.absolute())))
+        self.btn_open_folder.clicked.connect(self.open_memory_folder)
         self.tabs.currentChanged.connect(self.on_tab_changed)
         
         self.topic_list.currentRowChanged.connect(self.load_db_content)
@@ -3487,6 +3493,18 @@ class SoulMemoryViewer(QtWidgets.QDialog):
                 self.user_content_view.setPlainText(f"Error reading USER.md: {e}")
         else:
             self.user_content_view.setPlainText("")
+
+    def open_memory_folder(self):
+        folder = str(self.memory_dir.absolute())
+        try:
+            if os.name == "nt":
+                os.startfile(folder)
+            elif sys.platform == "darwin":
+                subprocess.Popen(["open", folder])
+            else:
+                subprocess.Popen(["xdg-open", folder])
+        except Exception as e:
+            logger.error(f"Cannot open memory folder: {e}")
 
     def refresh_memory(self):
         self.label_db_status.setText("")

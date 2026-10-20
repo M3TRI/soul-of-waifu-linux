@@ -5,6 +5,8 @@ import numpy as np
 import soundfile as sf
 import sounddevice as sd
 
+from app.utils import audio_output
+
 from PyQt6 import QtCore
 
 logger = logging.getLogger("Ambient Player Client")
@@ -61,6 +63,7 @@ class AmbientPlayer(QtCore.QThread):
             if peak > 0:
                 data = data / peak
 
+            data, samplerate = audio_output.fit_to_device(data, samplerate, self.device_index)
             self._raw_data = data
             self._samplerate = samplerate
             data_len = len(self._raw_data)

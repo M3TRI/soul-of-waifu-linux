@@ -2793,6 +2793,92 @@ class Ui_MainWindow(object):
         form_llm_hw.setVerticalSpacing(20)
         form_llm_hw.setHorizontalSpacing(30)
 
+        # === EXTERNAL OPENAI-COMPATIBLE SERVER ===
+        l_llm_hw.addLayout(create_section_header(self.translations.get("section_external_llm", "EXTERNAL SERVER (OPENAI-COMPATIBLE)")))
+
+        form_llm_ext = QtWidgets.QFormLayout()
+        form_llm_ext.setVerticalSpacing(20)
+        form_llm_ext.setHorizontalSpacing(30)
+
+        self.checkBox_llm_external = QtWidgets.QCheckBox(self.translations.get("llm_external_checkbox", "Use an external OpenAI-compatible server instead of the built-in llama.cpp"))
+        self.checkBox_llm_external.setFont(font_input)
+        self.checkBox_llm_external.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.checkBox_llm_external.setToolTip(self.translations.get("llm_external_tooltip", "Requests go to an already running server (llama.cpp, vLLM, LM Studio...). Nothing is launched by the program."))
+        self.checkBox_llm_external.setObjectName("checkBox_llm_external")
+        form_llm_ext.addRow("", self.checkBox_llm_external)
+
+        self.llm_base_url_label = QtWidgets.QLabel(self.translations.get("llm_base_url_label", "Server URL"))
+        self.llm_base_url_label.setFont(font_label)
+        self.lineEdit_llm_base_url = QtWidgets.QLineEdit()
+        self.lineEdit_llm_base_url.setFont(font_input)
+        self.lineEdit_llm_base_url.setFixedHeight(40)
+        self.lineEdit_llm_base_url.setPlaceholderText("http://127.0.0.1:8080/v1")
+        self.lineEdit_llm_base_url.setToolTip(self.translations.get("llm_base_url_tooltip", "Base URL of the OpenAI-compatible API. /v1 is appended automatically if missing."))
+        self.lineEdit_llm_base_url.setObjectName("lineEdit_llm_base_url")
+        form_llm_ext.addRow(self.llm_base_url_label, self.lineEdit_llm_base_url)
+
+        llm_model_layout = QtWidgets.QHBoxLayout()
+        llm_model_layout.setSpacing(15)
+        self.comboBox_llm_model = QtWidgets.QComboBox()
+        self.comboBox_llm_model.setEditable(True)
+        self.comboBox_llm_model.setFont(font_input)
+        self.comboBox_llm_model.setFixedHeight(40)
+        self.comboBox_llm_model.lineEdit().setPlaceholderText(self.translations.get("llm_model_placeholder", "Auto (first model from /v1/models)"))
+        self.comboBox_llm_model.setToolTip(self.translations.get("llm_model_tooltip", "Model id sent to the server. Leave empty to use the first model the server lists."))
+        self.comboBox_llm_model.setObjectName("comboBox_llm_model")
+
+        self.pushButton_llm_check = QtWidgets.QPushButton(self.translations.get("llm_check_btn", "Check connection"))
+        self.pushButton_llm_check.setFont(font_input)
+        self.pushButton_llm_check.setFixedHeight(40)
+        self.pushButton_llm_check.setCursor(QtGui.QCursor(QtCore.Qt.CursorShape.PointingHandCursor))
+        self.pushButton_llm_check.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.pushButton_llm_check.setToolTip(self.translations.get("llm_check_tooltip", "Connect to the server and load its model list."))
+        self.pushButton_llm_check.setObjectName("pushButton_llm_check")
+        self.pushButton_llm_check.setStyleSheet("""
+            QPushButton { 
+                background-color: rgba(59, 130, 246, 0.15); 
+                color: #93C5FD; 
+                border: 1px solid rgba(59, 130, 246, 0.3); 
+                border-radius: 6px; 
+                padding: 0 15px; 
+                font-weight: bold;
+            }
+            QPushButton:hover { 
+                background-color: rgba(59, 130, 246, 0.3); 
+                border: 1px solid rgba(59, 130, 246, 0.5); 
+                color: #FFFFFF; 
+            }
+            QPushButton:pressed { 
+                background-color: rgba(59, 130, 246, 0.1); 
+            }
+        """)
+        llm_model_layout.addWidget(self.comboBox_llm_model, 1)
+        llm_model_layout.addWidget(self.pushButton_llm_check)
+
+        self.llm_model_label = QtWidgets.QLabel(self.translations.get("llm_model_label", "Model"))
+        self.llm_model_label.setFont(font_label)
+        form_llm_ext.addRow(self.llm_model_label, llm_model_layout)
+
+        self.llm_api_key_label = QtWidgets.QLabel(self.translations.get("llm_api_key_label", "API Key"))
+        self.llm_api_key_label.setFont(font_label)
+        self.lineEdit_llm_api_key = QtWidgets.QLineEdit()
+        self.lineEdit_llm_api_key.setFont(font_input)
+        self.lineEdit_llm_api_key.setFixedHeight(40)
+        self.lineEdit_llm_api_key.setEchoMode(QtWidgets.QLineEdit.EchoMode.Password)
+        self.lineEdit_llm_api_key.setPlaceholderText(self.translations.get("llm_api_key_placeholder", "Optional, sent as Bearer token"))
+        self.lineEdit_llm_api_key.setObjectName("lineEdit_llm_api_key")
+        form_llm_ext.addRow(self.llm_api_key_label, self.lineEdit_llm_api_key)
+
+        self.checkBox_llm_extra_params = QtWidgets.QCheckBox(self.translations.get("llm_extra_params_checkbox", "Send llama.cpp sampler fields (Min-P, DRY, XTC, thinking budget)"))
+        self.checkBox_llm_extra_params.setFont(font_input)
+        self.checkBox_llm_extra_params.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.checkBox_llm_extra_params.setToolTip(self.translations.get("llm_extra_params_tooltip", "Turn off if the server rejects unknown request fields."))
+        self.checkBox_llm_extra_params.setObjectName("checkBox_llm_extra_params")
+        form_llm_ext.addRow("", self.checkBox_llm_extra_params)
+
+        l_llm_hw.addLayout(form_llm_ext)
+        l_llm_hw.addSpacing(10)
+
         l_llm_hw.addLayout(create_section_header(self.translations.get("section_inference_engine", "INFERENCE ENGINE")))
 
         self.llm_options_label = QtWidgets.QLabel(self.translations.get("llm_options_label", "Server Endpoint"))

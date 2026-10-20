@@ -47,6 +47,7 @@ from PyQt6.QtWidgets import (
 from app.gui.character_ai_assistant import CharacterAIAssistantDialog
 from app.utils.discord_rpc import DiscordRPCManager
 from app.utils.ai_clients.local_server_manager import LocalServerManager
+from app.utils.ai_clients.local_endpoint import LocalEndpointConfig, BUILTIN_PORT
 from app.utils.ai_clients.prompt_engine import (
     PromptEngine, strip_partial_state_tag, extract_state_update,
     strip_partial_reasoning_tag, extract_reasoning, find_reasoning_open, find_reasoning_close
@@ -210,7 +211,7 @@ class InterfaceSignals():
         self.emotion_resources = {
             emotion: {
                 "image": emotion,
-                "live2d_emotion": f"{emotions_path}\\{emotion}_animation.exp3.json",
+                "live2d_emotion": os.path.join(emotions_path, f"{emotion}_animation.exp3.json"),
             }
             for emotion in [
                 "admiration", "amusement", "anger", "annoyance", "approval", "caring",
@@ -8644,6 +8645,9 @@ class InterfaceSignals():
     def load_audio_devices(self):
         input_device_index = self.configuration_settings.get_main_setting("input_device")
         output_device_index = self.configuration_settings.get_main_setting("output_device_combo_index")
+        # Read before the combos are refilled: their change handlers overwrite these settings.
+        input_device_name = self.configuration_settings.get_main_setting("input_device_name")
+        output_device_name = self.configuration_settings.get_main_setting("output_device_name")
 
         self.ui.comboBox_input_devices.clear()
         self.ui.comboBox_output_devices.clear()
@@ -8653,12 +8657,23 @@ class InterfaceSignals():
         devices = sd.query_devices()
         host_apis = sd.query_hostapis()
 
+        if sys.platform != "win32":
+            # On Linux PortAudio lists raw ALSA hw:* devices first; they bypass PipeWire/PulseAudio
+            # and are usually busy or silent. Put the sound-server routed devices on top.
+            preferred = {"default": 0, "pipewire": 1, "pulse": 2}
+            devices = sorted(devices, key=lambda d: preferred.get(d["name"], len(preferred)))
+
         for dev in devices:
             if dev["max_input_channels"] > 0:
                 host_api_name = host_apis[dev["hostapi"]]["name"]
                 full_name = f"{dev['name']} ({host_api_name})"
                 self.ui.comboBox_input_devices.addItem(full_name)
                 self.input_device_list.append(dev["index"])
+
+        # PortAudio indexes shift on Linux as JACK clients come and go: prefer the saved name.
+        named_index = self.ui.comboBox_input_devices.findText(input_device_name) if input_device_name else -1
+        if named_index >= 0:
+            input_device_index = named_index
 
         self.set_combobox_to_device(self.ui.comboBox_input_devices, input_device_index)
 
@@ -8675,6 +8690,10 @@ class InterfaceSignals():
                 self.ui.comboBox_output_devices.addItem(full_name)
                 self.output_device_list.append(dev["index"])
 
+        named_index = self.ui.comboBox_output_devices.findText(output_device_name) if output_device_name else -1
+        if named_index >= 0:
+            output_device_index = named_index
+
         if output_device_index >= 0 and output_device_index < self.ui.comboBox_output_devices.count():
             self.ui.comboBox_output_devices.setCurrentIndex(output_device_index)
             real_index = self.output_device_list[output_device_index]
@@ -8685,6 +8704,11 @@ class InterfaceSignals():
             self.configuration_settings.update_main_setting("output_device_real_index", real_index)
             self.configuration_settings.update_main_setting("output_device_combo_index", 0)
 
+        if self.ui.comboBox_input_devices.count():
+            self.configuration_settings.update_main_setting("input_device_name", self.ui.comboBox_input_devices.currentText())
+        if self.ui.comboBox_output_devices.count():
+            self.configuration_settings.update_main_setting("output_device_name", self.ui.comboBox_output_devices.currentText())
+
     def set_combobox_to_device(self, combobox, index):
         if index != -1 and index < combobox.count():
             combobox.setCurrentIndex(index)
@@ -8694,12 +8718,14 @@ class InterfaceSignals():
         if index >= 0 and index < len(self.input_device_list):
             real_index = self.input_device_list[index]
             self.configuration_settings.update_main_setting("input_device_real_index", real_index)
+            self.configuration_settings.update_main_setting("input_device_name", self.ui.comboBox_input_devices.itemText(index))
 
     def on_comboBox_output_devices_changed(self, index):
         if index >= 0 and index < len(self.output_device_list):
             real_index = self.output_device_list[index]
             self.configuration_settings.update_main_setting("output_device_combo_index", index)
             self.configuration_settings.update_main_setting("output_device_real_index", real_index)
+            self.configuration_settings.update_main_setting("output_device_name", self.ui.comboBox_output_devices.itemText(index))
         else:
             if self.output_device_list:
                 real_index = self.output_device_list[0]
@@ -8904,7 +8930,7 @@ class InterfaceSignals():
         if selected_image == "None":
             image_path = None
         else:
-            images_directory = "assets\\backgrounds"
+            images_directory = "assets/backgrounds"
             image_path = os.path.join(images_directory, selected_image)
 
         self.configuration_settings.update_main_setting("model_background_image", image_path)
@@ -8912,7 +8938,7 @@ class InterfaceSignals():
     def load_background_images_to_comboBox(self):
         self.ui.comboBox_model_bg_image.clear()
 
-        backgrounds_directory = "assets\\backgrounds"
+        backgrounds_directory = "assets/backgrounds"
         for filename in os.listdir(backgrounds_directory):
             if filename.endswith((".jpg", ".png", ".jpeg")):
                 self.ui.comboBox_model_bg_image.addItem(filename)
@@ -8930,7 +8956,7 @@ class InterfaceSignals():
             sound_path = None
         else:
             selected_file = self.ui.comboBox_ambient_mode.itemData(index)
-            ambient_directory = "assets\\ambient"
+            ambient_directory = "assets/ambient"
             sound_path = os.path.join(ambient_directory, selected_file)
 
         self.configuration_settings.update_main_setting("ambient_sound", sound_path)
@@ -8938,7 +8964,7 @@ class InterfaceSignals():
     def load_ambient_sound_to_comboBox(self):
         self.ui.comboBox_ambient_mode.clear()
 
-        ambient_directory = "assets\\ambient"
+        ambient_directory = "assets/ambient"
         for filename in os.listdir(ambient_directory):
             if filename.endswith((".mp3", ".wav")):
                 name_without_extension = os.path.splitext(filename)[0]
@@ -9340,6 +9366,107 @@ class InterfaceSignals():
             self.configuration_settings.update_main_setting("flash_attention_status", True)
         else:
             self.configuration_settings.update_main_setting("flash_attention_status", False)
+
+    # === EXTERNAL OPENAI-COMPATIBLE SERVER ===
+    def initialize_external_llm_settings(self):
+        external = bool(self.configuration_settings.get_main_setting("local_llm_external"))
+        extra_params = self.configuration_settings.get_main_setting("local_llm_extra_params")
+        widgets = (self.ui.checkBox_llm_external, self.ui.lineEdit_llm_base_url, self.ui.comboBox_llm_model,
+                   self.ui.lineEdit_llm_api_key, self.ui.checkBox_llm_extra_params)
+        for w in widgets:
+            w.blockSignals(True)
+        self.ui.checkBox_llm_external.setChecked(external)
+        self.ui.lineEdit_llm_base_url.setText(self.configuration_settings.get_main_setting("local_llm_base_url") or "")
+        self.ui.comboBox_llm_model.setEditText(self.configuration_settings.get_main_setting("local_llm_model") or "")
+        self.ui.lineEdit_llm_api_key.setText(self.configuration_api.get_token("LOCAL_LLM_API_TOKEN") or "")
+        self.ui.checkBox_llm_extra_params.setChecked(extra_params is not False)
+        for w in widgets:
+            w.blockSignals(False)
+
+        self.update_external_llm_widgets()
+        if external:
+            QtCore.QTimer.singleShot(1500, self.auto_connect_external_llm)
+
+    def update_external_llm_widgets(self):
+        external = self.ui.checkBox_llm_external.isChecked()
+        for w in (self.ui.lineEdit_llm_base_url, self.ui.comboBox_llm_model, self.ui.pushButton_llm_check,
+                  self.ui.lineEdit_llm_api_key, self.ui.checkBox_llm_extra_params):
+            w.setEnabled(external)
+        self.ui.lineEdit_server.setText(LocalEndpointConfig().base_url if external
+                                        else f"http://localhost:{BUILTIN_PORT}/v1")
+
+    def _reset_external_llm_connection(self):
+        # Endpoint settings changed: the next request or "Check connection" probes the server again.
+        if self.local_server_manager.server_process is None and self.local_server_manager.model_loaded:
+            self.local_server_manager.model_loaded = False
+            self.local_server_manager.update_ui_for_server_state(False)
+
+    def on_checkBox_llm_external_stateChanged(self):
+        self.configuration_settings.update_main_setting("local_llm_external", self.ui.checkBox_llm_external.isChecked())
+        self._reset_external_llm_connection()
+        self.update_external_llm_widgets()
+
+    def on_checkBox_llm_extra_params_stateChanged(self):
+        self.configuration_settings.update_main_setting("local_llm_extra_params", self.ui.checkBox_llm_extra_params.isChecked())
+
+    def save_llm_base_url_in_real_time(self):
+        self._queue_setting_save("local_llm_base_url", self.ui.lineEdit_llm_base_url.text().strip())
+        self._reset_external_llm_connection()
+        QtCore.QTimer.singleShot(400, self.update_external_llm_widgets)
+
+    def save_llm_model_in_real_time(self):
+        self._queue_setting_save("local_llm_model", self.ui.comboBox_llm_model.currentText().strip())
+
+    def save_llm_api_key_in_real_time(self):
+        self._queue_api_save("LOCAL_LLM_API_TOKEN", self.ui.lineEdit_llm_api_key.text().strip())
+        self._reset_external_llm_connection()
+
+    def auto_connect_external_llm(self):
+        if not self.configuration_settings.get_main_setting("local_llm_external"):
+            return
+        task = asyncio.create_task(self.local_server_manager.ensure_server_running())
+        task.add_done_callback(lambda t: t.cancelled() or (t.exception() and logger.warning(
+            f"External LLM server is not reachable at startup: {t.exception()}")))
+
+    def on_pushButton_llm_check_clicked(self):
+        asyncio.create_task(self.check_external_llm_connection())
+
+    async def check_external_llm_connection(self):
+        endpoint = LocalEndpointConfig()
+        if not endpoint.external:
+            return
+        self.ui.pushButton_llm_check.setEnabled(False)
+        try:
+            self.local_server_manager.model_loaded = False
+            models = await self.local_server_manager.connect_external_server(endpoint)
+        except Exception as e:
+            sow_toast(
+                parent=self.main_window,
+                title=self.translations.get("llm_check_failed_title", "Server not reachable"),
+                text=str(e),
+                msg_type="error",
+                duration=6000
+            )
+            return
+        finally:
+            self.ui.pushButton_llm_check.setEnabled(True)
+
+        current = self.ui.comboBox_llm_model.currentText()
+        self.ui.comboBox_llm_model.blockSignals(True)
+        self.ui.comboBox_llm_model.clear()
+        self.ui.comboBox_llm_model.addItems(models)
+        self.ui.comboBox_llm_model.setEditText(current)
+        self.ui.comboBox_llm_model.blockSignals(False)
+
+        model_note = current or (models[0] if models else "-")
+        sow_toast(
+            parent=self.main_window,
+            title=self.translations.get("llm_check_ok_title", "Connected"),
+            text=self.translations.get("llm_check_ok_body", "Models on the server: {count}. Using: {model}").format(
+                count=len(models), model=model_note),
+            msg_type="success",
+            duration=5000
+        )
 
     def on_checkBox_enable_nsfw_stateChanged(self, checked: bool):
         self.configuration_settings.update_main_setting("nsfw_query", checked)
@@ -11920,7 +12047,7 @@ class InterfaceSignals():
         return widget
 
     def create_xttsv2_widgets(self, character_name, voice_type, rvc_enabled, file_name):
-        RVC_DIR = os.path.join(os.getcwd(), "assets\\rvc_models")
+        RVC_DIR = os.path.join(os.getcwd(), "assets/rvc_models")
 
         _SURF2    = "rgba(22, 22, 26, 0.5)"
         _SURF3    = "rgba(30, 30, 35, 0.5)"
@@ -12176,7 +12303,7 @@ class InterfaceSignals():
         return full_voice_name
 
     def create_edge_tts_widgets(self, character_name, voice_type, rvc_enabled, file_name, stacked_widget):
-        RVC_DIR = os.path.join(os.getcwd(), "assets\\rvc_models")
+        RVC_DIR = os.path.join(os.getcwd(), "assets/rvc_models")
 
         _SURF2    = "rgba(22, 22, 26, 0.5)"
         _SURF3    = "rgba(30, 30, 35, 0.5)"
@@ -12459,7 +12586,7 @@ class InterfaceSignals():
         return widget
 
     def create_kokoro_widgets(self, character_name, voice_name, rvc_enabled, file_name):
-        RVC_DIR = os.path.join(os.getcwd(), "assets\\rvc_models")
+        RVC_DIR = os.path.join(os.getcwd(), "assets/rvc_models")
 
         _SURF1    = "rgba(0, 0, 0, 0.3)"
         _SURF2    = "rgba(22, 22, 26, 0.5)"
@@ -12702,7 +12829,7 @@ class InterfaceSignals():
         return widget
 
     def create_silero_widgets(self, character_name, voice_name, rvc_enabled, file_name):
-        RVC_DIR = os.path.join(os.getcwd(), "assets\\rvc_models")
+        RVC_DIR = os.path.join(os.getcwd(), "assets/rvc_models")
         
         _SURF2    = "rgba(22, 22, 26, 0.5)"
         _SURF3    = "rgba(30, 30, 35, 0.5)"
@@ -12913,7 +13040,7 @@ class InterfaceSignals():
         return widget
 
     def create_qwen3_widgets(self, character_name, voice_name, rvc_enabled, file_name):
-        RVC_DIR = os.path.join(os.getcwd(), "assets\\rvc_models")
+        RVC_DIR = os.path.join(os.getcwd(), "assets/rvc_models")
 
         _SURF1    = "rgba(0, 0, 0, 0.3)"
         _SURF2    = "rgba(22, 22, 26, 0.5)"
@@ -13601,7 +13728,7 @@ class InterfaceSignals():
         return widget
 
     def create_expression_images_widgets(self, character_name, expression_images_folder):
-        EXP_DIR = os.path.join(os.getcwd(), "assets\\emotions\\images")
+        EXP_DIR = os.path.join(os.getcwd(), "assets/emotions/images")
         
         _SURF1    = "rgba(0, 0, 0, 0.3)"
         _SURF2    = "rgba(22, 22, 26, 0.5)"
@@ -13735,7 +13862,7 @@ class InterfaceSignals():
         return widget
 
     def create_live2d_model_widgets(self, character_name, live2d_model_folder):
-        LIVE2D_DIR = os.path.join(os.getcwd(), "assets\\emotions\\live2d")
+        LIVE2D_DIR = os.path.join(os.getcwd(), "assets/emotions/live2d")
         
         _SURF1    = "rgba(0, 0, 0, 0.3)"
         _SURF2    = "rgba(22, 22, 26, 0.5)"
@@ -13904,7 +14031,7 @@ class InterfaceSignals():
         return widget
 
     def create_vrm_model_widgets(self, character_name, vrm_model_file):
-        VRM_DIR = os.path.join(os.getcwd(), "assets\\emotions\\vrm")
+        VRM_DIR = os.path.join(os.getcwd(), "assets/emotions/vrm")
         
         _SURF1    = "rgba(0, 0, 0, 0.3)"
         _SURF2    = "rgba(22, 22, 26, 0.5)"
@@ -15659,7 +15786,7 @@ class InterfaceSignals():
         self.ui.listWidget_models_hub.setSpacing(8)
 
         models_dir = self.configuration_settings.get_main_setting("models_directory") \
-                     or "assets\\local_llm"
+                     or "assets/local_llm"
         models_dir = os.path.normpath(models_dir)
         if not os.path.exists(models_dir):
             os.makedirs(models_dir, exist_ok=True)
@@ -15810,18 +15937,23 @@ class InterfaceSignals():
 
     def _open_models_folder(self):
         models_dir = self.configuration_settings.get_main_setting("models_directory") \
-                     or "assets\\local_llm"
+                     or "assets/local_llm"
         models_dir = os.path.normpath(models_dir)
         if not os.path.exists(models_dir):
             os.makedirs(models_dir, exist_ok=True)
         try:
-            os.startfile(models_dir)
+            if os.name == "nt":
+                os.startfile(models_dir)
+            elif sys.platform == "darwin":
+                subprocess.Popen(["open", models_dir])
+            else:
+                subprocess.Popen(["xdg-open", models_dir])
         except Exception as e:
             logger.warning(f"[ModelsHub] Cannot open folder: {e}")
 
     def _change_models_directory(self):
         current_dir = self.configuration_settings.get_main_setting("models_directory") \
-                      or "assets\\local_llm"
+                      or "assets/local_llm"
         new_dir = QFileDialog.getExistingDirectory(
             self.main_window,
             "Select LLM Models Directory",
@@ -16854,7 +16986,8 @@ class InterfaceSignals():
         
         if conversation_method == "Local LLM":
             local_llm = self.configuration_settings.get_main_setting("local_llm")
-            if local_llm is None:
+            local_llm_external = self.configuration_settings.get_main_setting("local_llm_external")
+            if local_llm is None and not local_llm_external:
                 sow_toast(
                     parent=self.main_window,
                     title=self.translations.get("toast_llm_error_title", "Configuration Error"),

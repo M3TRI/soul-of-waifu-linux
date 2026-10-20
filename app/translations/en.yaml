@@ -2304,3 +2304,23 @@ xtc_thresh_tooltip: '<b>XTC Threshold</b><br><br>
   Determines how "popular" a word must be before XTC is allowed to remove it.<br><br>
 
   💡 <i>Recommended: 0.1 (Only words with >10% probability can be removed).</i>'
+
+# External OpenAI-compatible server (Linux port)
+section_external_llm: "EXTERNAL SERVER (OPENAI-COMPATIBLE)"
+llm_external_checkbox: "Use an external OpenAI-compatible server instead of the built-in llama.cpp"
+llm_external_tooltip: "Requests go to an already running server (llama.cpp, vLLM, LM Studio...). Nothing is launched by the program."
+llm_base_url_label: "Server URL"
+llm_base_url_tooltip: "Base URL of the OpenAI-compatible API. /v1 is appended automatically if missing."
+llm_model_label: "Model"
+llm_model_placeholder: "Auto (first model from /v1/models)"
+llm_model_tooltip: "Model id sent to the server. Leave empty to use the first model the server lists."
+llm_check_btn: "Check connection"
+llm_check_tooltip: "Connect to the server and load its model list."
+llm_api_key_label: "API Key"
+llm_api_key_placeholder: "Optional, sent as Bearer token"
+llm_extra_params_checkbox: "Send llama.cpp sampler fields (Min-P, DRY, XTC, thinking budget)"
+llm_extra_params_tooltip: "Turn off if the server rejects unknown request fields."
+llm_check_failed_title: "Server not reachable"
+llm_check_ok_title: "Connected"
+llm_check_ok_body: "Models on the server: {count}. Using: {model}"
+error_external_server_unreachable: "OpenAI-compatible server is not reachable. Check that it is running and the URL in the Local LLM settings."

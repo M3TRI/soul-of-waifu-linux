@@ -748,6 +748,11 @@ class SOW_System(QMainWindow):
     def mousePressEvent(self, e):
         if e.button() == Qt.MouseButton.LeftButton:
             if e.pos().y() <= self._tb.height() and e.pos().x() <= self.left_panel.width():
+                # Let the compositor move the window: Wayland ignores client-side move().
+                handle = self.windowHandle()
+                if handle is not None and handle.startSystemMove():
+                    e.accept()
+                    return
                 self._drag = True
                 self._drag_off = e.pos()
 

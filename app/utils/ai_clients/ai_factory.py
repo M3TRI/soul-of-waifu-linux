@@ -4,6 +4,7 @@ from app.utils.ai_clients.providers.openai_provider import OpenAIProvider
 from app.utils.ai_clients.providers.openrouter_provider import OpenRouterProvider
 from app.utils.ai_clients.providers.mistral_provider import MistralProvider
 from app.utils.ai_clients.providers.local_provider import LocalProvider
+from app.utils.ai_clients.local_endpoint import LocalEndpointConfig
 from app.utils.ai_clients.providers.anthropic_provider import AnthropicProvider
 from app.utils.ai_clients.providers.gemini_provider import GeminiProvider
 from app.utils.ai_clients.providers.deepseek_provider import DeepSeekProvider
@@ -101,7 +102,12 @@ class AIFactory:
                     if dyn_range > 0:
                         advanced_params["dynatemp_range"] = dyn_range
 
-            return LocalProvider(port=48596, advanced_params=advanced_params)
+            send_extra_params = config_settings.get_main_setting("local_llm_extra_params")
+            return LocalProvider(
+                endpoint=LocalEndpointConfig(),
+                advanced_params=advanced_params,
+                send_extra_params=send_extra_params is not False,
+            )
 
         else:
             logger.error(f"Unknown conversation method requested: {conversation_method}")

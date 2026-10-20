@@ -141,6 +141,7 @@ class MainWindow(QMainWindow):
 
         self.interface_signals.initialize_api_token_line_edit()
         self.interface_signals.initialize_lineEdit_customArgs()
+        self.interface_signals.initialize_external_llm_settings()
         self.interface_signals.initialize_lineEdit_mcp_url()
         self.interface_signals.initialize_gpu_layers_horizontalSlider()
         self.interface_signals.initialize_context_size_horizontalSlider()
@@ -541,6 +542,12 @@ class MainWindow(QMainWindow):
         # CheckBox
         self.ui.checkBox_enable_mlock.stateChanged.connect(self.interface_signals.on_checkBox_enable_mlock_stateChanged)
         self.ui.checkBox_enable_flash_attention.stateChanged.connect(self.interface_signals.on_checkBox_enable_flash_attention_stateChanged)
+        self.ui.checkBox_llm_external.stateChanged.connect(self.interface_signals.on_checkBox_llm_external_stateChanged)
+        self.ui.checkBox_llm_extra_params.stateChanged.connect(self.interface_signals.on_checkBox_llm_extra_params_stateChanged)
+        self.ui.lineEdit_llm_base_url.textChanged.connect(self.interface_signals.save_llm_base_url_in_real_time)
+        self.ui.comboBox_llm_model.currentTextChanged.connect(self.interface_signals.save_llm_model_in_real_time)
+        self.ui.lineEdit_llm_api_key.textChanged.connect(self.interface_signals.save_llm_api_key_in_real_time)
+        self.ui.pushButton_llm_check.clicked.connect(self.interface_signals.on_pushButton_llm_check_clicked)
         self.ui.checkBox_enable_no_mmap.stateChanged.connect(self.interface_signals.on_checkBox_enable_no_mmap_stateChanged)
         self.ui.checkBox_enable_advanced_sampling.stateChanged.connect(self.interface_signals.on_checkBox_enable_advanced_sampling_stateChanged)
         self.ui.stackedWidget.currentChanged.connect(self.interface_signals.on_stacked_widget_changed)
@@ -836,6 +843,11 @@ class MainWindow(QMainWindow):
     def mousePressEvent(self, event):
         if event.button() == QtCore.Qt.MouseButton.LeftButton:
             if event.pos().y() <= self.ui.frame_version.height():
+                # Let the compositor move the window: Wayland ignores client-side move().
+                handle = self.windowHandle()
+                if handle is not None and handle.startSystemMove():
+                    event.accept()
+                    return
                 self.draggable = True
                 self.offset = event.pos()
 

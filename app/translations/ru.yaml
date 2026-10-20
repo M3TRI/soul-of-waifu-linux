@@ -2310,3 +2310,23 @@ xtc_thresh_tooltip: '<b>Порог XTC (Threshold)</b><br><br>
   Определяет, насколько "популярным" (вероятным) должно быть слово, чтобы алгоритм XTC имел право его удалить.<br><br>
 
   💡 <i>Оптимально: 0.1 (Удаляются только слова с вероятностью выше 10%).</i>'
+
+# External OpenAI-compatible server (Linux port)
+section_external_llm: "ВНЕШНИЙ СЕРВЕР (OPENAI-СОВМЕСТИМЫЙ)"
+llm_external_checkbox: "Использовать внешний OpenAI-совместимый сервер вместо встроенного llama.cpp"
+llm_external_tooltip: "Запросы идут на уже запущенный сервер (llama.cpp, vLLM, LM Studio...). Программа ничего не запускает сама."
+llm_base_url_label: "Адрес сервера"
+llm_base_url_tooltip: "Базовый адрес OpenAI-совместимого API. /v1 добавляется автоматически, если его нет."
+llm_model_label: "Модель"
+llm_model_placeholder: "Авто (первая модель из /v1/models)"
+llm_model_tooltip: "Id модели для запросов. Оставьте пустым, чтобы взять первую модель из списка сервера."
+llm_check_btn: "Проверить подключение"
+llm_check_tooltip: "Подключиться к серверу и загрузить список его моделей."
+llm_api_key_label: "API-ключ"
+llm_api_key_placeholder: "Необязательно, передаётся как Bearer-токен"
+llm_extra_params_checkbox: "Передавать поля сэмплеров llama.cpp (Min-P, DRY, XTC, бюджет размышлений)"
+llm_extra_params_tooltip: "Отключите, если сервер отвергает незнакомые поля запроса."
+llm_check_failed_title: "Сервер недоступен"
+llm_check_ok_title: "Подключено"
+llm_check_ok_body: "Моделей на сервере: {count}. Используется: {model}"
+error_external_server_unreachable: "OpenAI-совместимый сервер недоступен. Проверьте, что он запущен и адрес в настройках Local LLM верный."

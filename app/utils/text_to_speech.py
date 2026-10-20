@@ -25,6 +25,7 @@ from qwen_tts import Qwen3TTSModel
 from PyQt6.QtCore import QThread, pyqtSignal
 
 from app.configuration import configuration
+from app.utils import audio_output
 from rvc_python.infer import RVCInference
 
 import torch.serialization
@@ -127,7 +128,7 @@ class ElevenLabs:
             samples = np.array(audio.get_array_of_samples())
             sample_rate = audio.frame_rate
             sd.default.device = self.device_index
-            await asyncio.to_thread(sd.play, samples, samplerate=sample_rate)
+            await asyncio.to_thread(audio_output.play, samples, sample_rate)
             await asyncio.to_thread(sd.wait)
         except Exception as e:
             logger.error(f"Error: {e}")
@@ -334,7 +335,7 @@ class EdgeTTS:
             try:
                 data, samplerate = sf.read(file_path, dtype='float32')
                 sd.default.device = self.device_index
-                sd.play(data, samplerate)
+                audio_output.play(data, samplerate)
                 sd.wait()
             except Exception as e:
                 logger.error(f"Error: {e}")
@@ -561,7 +562,9 @@ class Qwen3TTS_SOW_System:
                 if qwen_device == "cuda" and torch.cuda.is_available():
                     self.device = "cuda"
                     target_dtype = torch.bfloat16
-                    target_device_map = "auto"
+                    # Whole model on the GPU. "auto" lets accelerate offload part of it to the CPU
+                    # when VRAM looks tight, and generation then fails on meta tensors.
+                    target_device_map = "cuda"
                 else:
                     self.device = "cpu"
                     target_dtype = torch.float32
@@ -827,7 +830,7 @@ class AudioPlaybackWorker(QThread):
                 try:
                     data, samplerate = sf.read(file_path, dtype='float32')
                     sd.default.device = self.device_index
-                    sd.play(data, samplerate)
+                    audio_output.play(data, samplerate)
 
                     duration = len(data) / samplerate
                     chunk_size = int(samplerate * 0.05)
@@ -1496,6 +1499,15 @@ class PipelinedTTSWorker(QThread):
                 logger.error(f"[PipelinedTTS] engine init failed: {e}")
                 continue
 
+            try:
+                await self._load_engine_model()
+            except asyncio.CancelledError:
+                logger.info("[PipelinedTTS] producer cancelled")
+                break
+            except Exception as e:
+                logger.error(f"[PipelinedTTS] TTS model load failed: {e}")
+                continue
+
             output_file = None
             try:
                 output_file = await asyncio.wait_for(
@@ -1635,7 +1647,7 @@ class PipelinedTTSWorker(QThread):
             return
 
         try:
-            sd.play(data, samplerate, device=self.device_index)
+            audio_output.play(data, samplerate, device=self.device_index)
         except Exception as e:
             logger.error(f"[PipelinedTTS] sd.play error: {e}")
             try:
@@ -1706,6 +1718,22 @@ class PipelinedTTSWorker(QThread):
                     os.remove(file_path)
             except Exception:
                 pass
+
+    async def _load_engine_model(self):
+        """
+        Load the local TTS model outside the per-sentence timeout. A cold load (download or
+        first GPU init) outlasts TTS_TIMEOUT_SEC; wait_for then cancels it before tts_loaded
+        is set and every following sentence starts loading the model again.
+        """
+        method = self.tts_method
+        if method == "XTTSv2":
+            await asyncio.to_thread(self.xtts._load_tts_sync)
+        elif method == "Kokoro":
+            await self.kokoro._load_tts()
+        elif method == "Silero":
+            await self.silero._load_tts()
+        elif method == "Qwen-3 TTS":
+            await self.qwen._load_tts(self.character_name)
 
     async def _generate_wav(self, text: str) -> Optional[str]:
         method = self.tts_method

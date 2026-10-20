@@ -2,6 +2,7 @@ import logging
 import httpx
 from openai import AsyncOpenAI, APIConnectionError, APITimeoutError
 from app.utils.ai_clients.base_provider import BaseAIProvider
+from app.utils.ai_clients.local_endpoint import LocalEndpointConfig
 
 logger = logging.getLogger("Local Provider")
 
@@ -13,10 +14,15 @@ REASONING_EFFORT_TO_BUDGET = {
 }
 
 class LocalProvider(BaseAIProvider):
-    def __init__(self, port: int = 48596, advanced_params: dict = None):
-        self.base_url = f"http://127.0.0.1:{port}/v1"
-        self.api_key = "no-key-required"
+    def __init__(self, endpoint: LocalEndpointConfig = None, advanced_params: dict = None,
+                 send_extra_params: bool = True):
+        self.endpoint = endpoint or LocalEndpointConfig()
+        self.base_url = self.endpoint.base_url
+        self.api_key = self.endpoint.api_key
         self.advanced_params = advanced_params or {}
+        # llama.cpp-specific fields (min_p, dry_*, xtc_*, thinking_budget_tokens) go in
+        # extra_body; a strict OpenAI-compatible server may reject them.
+        self.send_extra_params = send_extra_params
 
         self.client = AsyncOpenAI(
             base_url=self.base_url,
@@ -29,10 +35,19 @@ class LocalProvider(BaseAIProvider):
 
     def _connection_error_message(self, e: Exception) -> str:
         logger.error(f"Local API Connection Error: {e}")
+        if self.endpoint.external:
+            return (
+                f"\n⚠️ Local API Error: Could not reach the OpenAI-compatible server at {self.base_url}. "
+                "Check that it is running and the URL in the Local LLM settings is correct."
+            )
         return (
             "\n⚠️ Local API Error: Could not reach the local server. "
             "It may still be loading the model, may have crashed, or the port may be blocked."
         )
+
+    def _attach_extra_body(self, payload: dict, extra_body: dict) -> None:
+        if extra_body and self.send_extra_params:
+            payload["extra_body"] = extra_body
 
     def _apply_thinking_budget(self, extra_body: dict, kwargs: dict, payload: dict) -> None:
         reasoning_mode = kwargs.get("reasoning_mode")
@@ -48,7 +63,7 @@ class LocalProvider(BaseAIProvider):
 
     async def generate_stream(self, messages: list[dict], **kwargs):
         payload = {
-            "model": "local-model",
+            "model": await self.endpoint.resolve_model(),
             "messages": messages,
             "stream": True,
             "max_tokens": kwargs.get("max_tokens", 1000),
@@ -64,8 +79,7 @@ class LocalProvider(BaseAIProvider):
 
         extra_body = dict(self.advanced_params) if self.advanced_params else {}
         self._apply_thinking_budget(extra_body, kwargs, payload)
-        if extra_body:
-            payload["extra_body"] = extra_body
+        self._attach_extra_body(payload, extra_body)
 
         try:
             completion = await self.client.chat.completions.create(**payload)
@@ -80,7 +94,7 @@ class LocalProvider(BaseAIProvider):
 
     async def generate_summary(self, messages: list[dict], **kwargs):
         payload = {
-            "model": "local-model",
+            "model": await self.endpoint.resolve_model(),
             "messages": messages,
             "stream": True,
             "max_tokens": kwargs.get("max_tokens", 1000),
@@ -96,7 +110,7 @@ class LocalProvider(BaseAIProvider):
 
         reasoning_mode = kwargs.get("reasoning_mode", False)
         if reasoning_mode is False:
-            payload["extra_body"] = {"thinking_budget_tokens": 0}
+            self._attach_extra_body(payload, {"thinking_budget_tokens": 0})
 
         try:
             completion = await self.client.chat.completions.create(**payload)
@@ -112,7 +126,7 @@ class LocalProvider(BaseAIProvider):
 
     async def generate(self, messages: list[dict], tools: list = None, **kwargs) -> dict:
         payload = {
-            "model": "local-model",
+            "model": await self.endpoint.resolve_model(),
             "messages": messages,
             "stream": False,
             "max_tokens": kwargs.get("max_tokens", 1000),
@@ -132,8 +146,7 @@ class LocalProvider(BaseAIProvider):
         reasoning_mode = kwargs.get("reasoning_mode")
         if reasoning_mode is False:
             extra_body["thinking_budget_tokens"] = 0
-        if extra_body:
-            payload["extra_body"] = extra_body
+        self._attach_extra_body(payload, extra_body)
 
         try:
             completion = await self.client.chat.completions.create(**payload)
@@ -147,4 +160,4 @@ class LocalProvider(BaseAIProvider):
             return {"content": None, "tool_calls": None}
         except Exception as e:
             logger.error(f"Local API Generate Error: {e}")
-            return {"content": None, "tool_calls": None}
+            return {"content": None, "tool_calls": None}

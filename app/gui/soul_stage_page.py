@@ -29,7 +29,7 @@ SCENES_FILE    = SOUL_STAGE_DIR / "scenes.json"
 TRANSLATIONS_DIR = Path("app/translations")
 SOUL_STAGE_DIR.mkdir(exist_ok=True)
 if not SCENES_FILE.exists():
-    SCENES_FILE.write_text(json.dumps({"scenes": {}}, ensure_ascii=False, indent=2))
+    SCENES_FILE.write_text(json.dumps({"scenes": {}, "scene_groups": {}}, ensure_ascii=False, indent=2))
 
 COMBO_STYLE = """
             QComboBox {

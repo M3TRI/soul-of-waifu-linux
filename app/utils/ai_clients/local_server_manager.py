@@ -12,6 +12,7 @@ import yaml
 import psutil
 
 from app.configuration import configuration
+from app.utils.ai_clients.local_endpoint import LocalEndpointConfig
 
 logger = logging.getLogger("Local Server Manager")
 
@@ -377,6 +378,7 @@ class LocalServerManager:
     async def stop_server(self):
         if self.server_process is None:
             logger.info("Server is not running.")
+            self.model_loaded = False
             self.update_ui_for_server_state(False)
             return
 
@@ -398,8 +400,34 @@ class LocalServerManager:
         except Exception as e:
             logger.error(f"Error when stopping the server: {e}", exc_info=True)
 
+    async def connect_external_server(self, endpoint: LocalEndpointConfig) -> list:
+        """External mode: nothing is launched, only check that the endpoint answers. Returns model ids."""
+        logger.info(f"Connecting to external OpenAI-compatible server at {endpoint.base_url}")
+        try:
+            models = await endpoint.fetch_models_async(timeout=10.0)
+        except Exception as e:
+            logger.error(f"External server at {endpoint.base_url} is not reachable: {e}")
+            self.model_loaded = False
+            self.update_ui_for_server_state(False)
+            message = self.translations.get(
+                "error_external_server_unreachable",
+                "OpenAI-compatible server is not reachable."
+            )
+            raise RuntimeError(f"{message}\n{endpoint.base_url}: {e}")
+
+        logger.info(f"External server is online, models: {models}")
+        self.model_loaded = True
+        self.update_ui_for_server_state(True)
+        return models
+
     async def ensure_server_running(self):
         async with self.restart_lock:
+            endpoint = LocalEndpointConfig()
+            if endpoint.external:
+                if not self.model_loaded:
+                    await self.connect_external_server(endpoint)
+                return
+
             if self.is_server_already_running():
                 self.model_loaded = True
                 self.update_ui_for_server_state(True)

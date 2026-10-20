@@ -47,11 +47,13 @@ from app.gui.custom_widgets import sow_toast, safe_paint
 
 import sys
 import ctypes
-from ctypes import wintypes
 from datetime import datetime
 import random
 
 if sys.platform == "win32":
+    # ctypes.wintypes raises ValueError on import outside Windows on Python 3.11
+    from ctypes import wintypes
+
     class _LASTINPUTINFO(ctypes.Structure):
         _fields_ = [
             ("cbSize", wintypes.UINT),
@@ -63,6 +65,10 @@ if sys.platform == "win32":
         lii.cbSize = ctypes.sizeof(_LASTINPUTINFO)
         if ctypes.windll.user32.GetLastInputInfo(ctypes.byref(lii)):
             return ctypes.windll.kernel32.GetTickCount64() - lii.dwTime
+        return 0
+else:
+    def _get_system_idle_time_ms() -> int:
+        # No portable idle query outside Windows: the companion never dozes off by idle time.
         return 0
 
 logger = logging.getLogger("SOW System Interface Signals")
@@ -152,7 +158,7 @@ class Soul_Of_Waifu_System(QtCore.QObject):
         self.emotion_resources = {
             emotion: {
                 "image": emotion,
-                "live2d_emotion": f"{emotions_path}\\{emotion}_animation.exp3.json",
+                "live2d_emotion": os.path.join(emotions_path, f"{emotion}_animation.exp3.json"),
             }
             for emotion in [
                 "admiration", "amusement", "anger", "annoyance", "approval", "caring",
@@ -452,7 +458,8 @@ class Soul_Of_Waifu_System(QtCore.QObject):
 
         if conversation_method == "Local LLM":
             local_llm = self.configuration_settings.get_main_setting("local_llm")
-            if local_llm is None:
+            local_llm_external = self.configuration_settings.get_main_setting("local_llm_external")
+            if local_llm is None and not local_llm_external:
                 sow_toast(
                     parent=self.parent_window,
                     title=self.translations.get("llm_error_title", "No Local LLM"),
