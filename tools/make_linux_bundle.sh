@@ -34,6 +34,9 @@ done
 rm -f "$STAGE/PROGRESS.md" "$STAGE/tools/live_external_llm.py" "$STAGE/tools/test_external_llm.py"
 
 # settings.json: keep the Linux/external-LLM defaults, drop this machine's audio devices.
+# Taken from HEAD, not the working tree: the app rewrites it on every run with the owner's
+# themes, presets and web_auth_token.
+git show HEAD:app/configuration/settings.json > "$STAGE/app/configuration/settings.json"
 python3 -I - "$STAGE/app/configuration/settings.json" <<'EOF'
 import json, sys
 path = sys.argv[1]

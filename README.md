@@ -3,15 +3,29 @@
 **[Русская версия](README_RU.md)**
 
 Unofficial Linux port of [Soul of Waifu](https://github.com/jofizcd/Soul-of-Waifu) v2.5.1
-by jofizcd. The upstream project ships for Windows only. This port runs on Debian, Ubuntu and
-their derivatives (Linux Mint, Zorin OS, Pop!_OS, ...) and comes with a local LLM out of
-the box. The installer sets up llama.cpp and a model, and the app talks to it over the
+by jofizcd. The upstream project ships for Windows only. This port runs on Arch Linux,
+Debian, Ubuntu and their derivatives (EndeavourOS, Manjaro, CachyOS, Linux Mint, Zorin OS,
+Pop!_OS, ...) and comes with a local LLM out of the box. The installer sets up llama.cpp and a model, and the app talks to it over the
 OpenAI-compatible API.
 
 ## Install
 
-Requirements: x86-64, Debian 12+ / Ubuntu 22.04+ or a derivative, about 20 GB free disk space,
-and a user with `sudo`. An NVIDIA GPU is optional, but it helps a lot.
+Requirements: x86-64, Arch Linux, Debian 12+ / Ubuntu 22.04+ or a derivative, about 20 GB
+free disk space, and a user with `sudo`. An NVIDIA GPU is optional, but it helps a lot.
+
+The app is the same on every distribution; only the installer script differs, because it
+installs the system packages with the distribution's package manager.
+
+**Arch Linux** and derivatives:
+
+```bash
+sudo pacman -S --needed git
+git clone https://gitlab.projectmiku.cc/opensrc/soul-of-waifu-linux.git
+cd soul-of-waifu-linux
+./install_arch.sh
+```
+
+**Debian / Ubuntu** and derivatives:
 
 ```bash
 sudo apt install -y git
@@ -24,14 +38,17 @@ Then open **Soul of Waifu** from the application menu, or run `./launch.sh`.
 
 The first install downloads about 5-8 GB (Python packages, llama.cpp, models) and takes
 15-40 minutes. The app is installed in place, inside the cloned folder; nothing is put in
-system directories except the apt packages.
+system directories except the system packages.
 
 > **NVIDIA users:** install the proprietary driver first (Ubuntu/Zorin: *Software &
 > Updates → Additional Drivers*, or `sudo ubuntu-drivers install`) and reboot. The
 > installer reads `nvidia-smi` to pick the right CUDA build. Without a working driver
-> it falls back to CPU/Vulkan.
+> it falls back to CPU/Vulkan. On Arch, install `nvidia-open` (or `nvidia-open-dkms`) and
+> `nvidia-utils` as described in the [Arch Wiki](https://wiki.archlinux.org/title/NVIDIA).
 
 ### Installer options
+
+`install_arch.sh` and `install_debian.sh` take the same options.
 
 | Option | Meaning |
 |---|---|
@@ -50,18 +67,20 @@ You can re-run the installer at any time. Finished steps are skipped, and your
 ```bash
 cd soul-of-waifu-linux
 git pull
-./install_debian.sh
+./install_arch.sh     # or ./install_debian.sh
 ```
 
 ## What the installer does
 
-1. Installs system libraries with apt (Qt/OpenGL/audio libraries, ffmpeg, build tools).
+1. Installs system libraries (Qt/OpenGL/audio libraries, ffmpeg, build tools): with
+   `pacman -Syu` on Arch (this also updates the system, partial upgrades are not supported
+   there; Vulkan drivers for AMD/Intel GPUs are added automatically), with apt on Debian/Ubuntu.
 2. Installs [uv](https://docs.astral.sh/uv/) together with Python 3.11, then all Python
    dependencies, into `./.venv` (via `install_linux.sh`). The system Python is not touched.
 3. Downloads the official [llama.cpp](https://github.com/ggml-org/llama.cpp) release build
    into `./llama`:
-   - **CUDA** if the NVIDIA driver is 570 or newer and the system is Ubuntu 24.04+ / Zorin 18+
-     (the official CUDA build needs glibc 2.38);
+   - **CUDA** if the NVIDIA driver is 570 or newer and the system is Arch or
+     Ubuntu 24.04+ / Zorin 18+ (the official CUDA build needs glibc 2.38);
    - **Vulkan** otherwise: AMD, Intel, older NVIDIA drivers, Ubuntu 22.04 / Zorin 17 / Debian 12.
      It runs on NVIDIA GPUs too, through the proprietary driver, and falls back to the CPU if
      no GPU is found.
@@ -129,7 +148,10 @@ App logs are in `logs/`.
 - External OpenAI-compatible server mode for **Local LLM**, with a settings UI and auto-connect.
 - Linux fixes: Windows-only imports and idle timer, backslash asset paths, file manager
   integration, Wayland window dragging, PipeWire/PulseAudio device selection (also
-  remembered by name), and resampling to the output device's native sample rate.
+  remembered by name), resampling to the output device's native sample rate, mono TTS
+  played on both channels of JACK/PipeWire devices, Live2D rendering on Wayland (desktop
+  OpenGL context), and WebGL for the VRM view on NVIDIA + Wayland (NVIDIA EGL pinned in
+  `start.sh`).
 - TTS fixes: model loading no longer counts against the per-sentence timeout, and Qwen3-TTS
   is loaded fully onto the GPU.
 - Windows-only features are unchanged and do not work here: PC control tools and the built-in

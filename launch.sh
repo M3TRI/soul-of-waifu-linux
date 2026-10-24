@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Starts the bundled llama-server (unless an OpenAI-compatible server already answers on
 # LLAMA_PORT), waits until the model is loaded, runs the app, and stops the server again
-# when the app exits. Settings live in ./llama.conf (written by install_debian.sh).
+# when the app exits. Settings live in ./llama.conf (written by install_arch.sh/install_debian.sh).
 # The app reaches the server through main_settings.local_llm_base_url, which must point
 # at the same port (http://127.0.0.1:8095/v1 by default).
 cd "$(dirname "$(readlink -f "$0")")" || exit 1
@@ -45,7 +45,7 @@ else
         exit 1
     fi
     if [ ! -x llama/llama-server ]; then
-        say "llama/llama-server is missing, run ./install_debian.sh first."
+        say "llama/llama-server is missing, run ./install_arch.sh or ./install_debian.sh first."
         exit 1
     fi
 

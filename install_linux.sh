@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Linux counterpart of installer.bat: same packages and pins, installed into ./.venv with uv.
-# System packages needed (Arch): python build deps (base-devel), portaudio, ffmpeg.
-# Debian/Ubuntu: use install_debian.sh, which installs them and then runs this script.
+# System packages (build tools, portaudio, ffmpeg, Qt libraries) come from install_arch.sh or
+# install_debian.sh, which install them and then run this script.
 set -euo pipefail
 cd "$(dirname "$0")"
 

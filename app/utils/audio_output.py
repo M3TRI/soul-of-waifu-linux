@@ -33,7 +33,25 @@ def fit_to_device(data, samplerate, device=None):
     return resampled, target
 
 
+def upmix_mono(data, device=None):
+    """
+    Duplicate mono audio onto two channels when the output device has them.
+
+    A one-channel stream on a JACK device is connected to its first port only, so mono TTS
+    output plays in the left ear; ALSA/PulseAudio devices upmix on their own.
+    """
+    if np.ndim(data) != 1:
+        return data
+    try:
+        channels = int(sd.query_devices(device, "output")["max_output_channels"])
+    except Exception:
+        return data
+    if channels < 2:
+        return data
+    return np.column_stack((data, data))
+
+
 def play(data, samplerate, device=None):
-    """sd.play that adapts the sample rate to what the output device accepts."""
+    """sd.play that adapts the sample rate and channel count to the output device."""
     data, samplerate = fit_to_device(data, samplerate, device)
-    sd.play(data, samplerate, device=device)
+    sd.play(upmix_mono(data, device), samplerate, device=device)

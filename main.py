@@ -930,6 +930,12 @@ if __name__ == "__main__":
     if sys.platform == 'win32':
         app_id = "com.jofizcd.soul_of_waifu.v2"
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(app_id)
+    elif sys.platform.startswith('linux'):
+        # Qt on Wayland defaults to an OpenGL ES context, where the desktop GL calls of the
+        # Live2D widget (glClearDepth and the Cubism renderer) fail with GL_INVALID_OPERATION.
+        surface_format = QtGui.QSurfaceFormat.defaultFormat()
+        surface_format.setRenderableType(QtGui.QSurfaceFormat.RenderableType.OpenGL)
+        QtGui.QSurfaceFormat.setDefaultFormat(surface_format)
 
     app = QApplication(sys.argv)
 
