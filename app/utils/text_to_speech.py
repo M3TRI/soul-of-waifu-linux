@@ -97,6 +97,28 @@ class ElevenLabs:
         self.audio_cache = AudioSegment.empty()
 
 
+# Engines whose synthesis of a long sentence takes longer than the listener should wait for the
+# first sound (Qwen3-TTS runs at about 0.8x real time on an RTX 5060 Ti).
+SLOW_TTS_METHODS = ("Qwen-3 TTS", "XTTSv2")
+
+
+def split_clauses(text, min_len=30):
+    """
+    Split a sentence at its clause marks into pieces of at least min_len characters. When
+    nothing is playing, a slow engine then synthesises the first clause and each next one while
+    the previous plays (each takes less time than the previous one sounds), instead of keeping
+    the listener waiting for the whole sentence: on Qwen3-TTS the first sound of a 230-character
+    sentence comes after 2.8 s instead of 12.9 s.
+    """
+    pieces, start = [], 0
+    for m in re.finditer(r'[,;:]\s+|\s+[—–-]\s+', text):
+        if m.end() - start >= min_len and len(text) - m.end() >= min_len:
+            pieces.append(text[start:m.end()].strip())
+            start = m.end()
+    pieces.append(text[start:].strip())
+    return pieces
+
+
 class _ServerEngine:
     """
     Base of the TTS engines that run on the Soul of Waifu server (server/speech). Each engine
@@ -289,6 +311,7 @@ class AudioPlaybackWorker(QThread):
         self.is_running = True
         self.device_index = device_index
         self.interrupt_flag = False
+        self.playing = False
 
     def add_audio_file(self, file_path, persist=False):
         self.interrupt_flag = False
@@ -330,6 +353,7 @@ class AudioPlaybackWorker(QThread):
                     self.queue.task_done()
                     continue
 
+                self.playing = True
                 try:
                     data, samplerate = sf.read(file_path, dtype='float32')
                     sd.default.device = self.device_index
@@ -363,6 +387,7 @@ class AudioPlaybackWorker(QThread):
                     logger.error(f"Playback error: {e}")
 
                 finally:
+                    self.playing = False
                     if not persist:
                         try:
                             if os.path.exists(file_path):
@@ -388,6 +413,10 @@ class AudioPlaybackWorker(QThread):
         self.queue.put(None)
         self.quit()
         self.wait()
+
+
+# Workers stopped with retire() stay referenced here until their thread has finished.
+_RETIRED_WORKERS = set()
 
 
 class TTSWorker(QThread):
@@ -424,8 +453,15 @@ class TTSWorker(QThread):
         self.qwen = Qwen3TTS_SOW_System()
         self.eleven = ElevenLabs()
 
+        self._generating = False
+
         self.playback_worker = AudioPlaybackWorker(self.device_index)
         self.playback_worker.start()
+
+    def _idle(self):
+        """Nothing queued, being synthesised or playing: the next sentence is heard only when done."""
+        return (not self._generating and self.queue.empty()
+                and self.playback_worker.queue.empty() and not self.playback_worker.playing)
 
     def add_text(self, text, message_id=None):
         if not text:
@@ -438,10 +474,15 @@ class TTSWorker(QThread):
         raw_sentences = re.split(r'(?<=[.!?])\s+', text)
         current_chunk = ""
         max_chunk_len = 450 
+        split_lead = self.tts_method in SLOW_TTS_METHODS and self._idle()
         
         def _enqueue(chunk_text):
+            nonlocal split_lead
             if chunk_text:
-                self.queue.put((chunk_text, message_id))
+                pieces = split_clauses(chunk_text) if split_lead else [chunk_text]
+                split_lead = False
+                for piece in pieces:
+                    self.queue.put((piece, message_id))
 
         for sentence in raw_sentences:
             sentence = sentence.strip()
@@ -605,6 +646,7 @@ class TTSWorker(QThread):
 
                 if text:
                     self.discard_current = False
+                    self._generating = True
                     logger.info(f"Generating Audio for: {text[:30]}...")
                     output_file = None
 
@@ -633,6 +675,7 @@ class TTSWorker(QThread):
                             self.eleven.generate_speech_with_elevenlabs_sow_system(text, self.voice_id)
                         )
 
+                    self._generating = False
                     if self.discard_current:
                         logger.info("TTS finished, but was interrupted. Discarding audio.")
                         if output_file and os.path.exists(output_file):
@@ -667,6 +710,7 @@ class TTSWorker(QThread):
             except queue.Empty:
                 continue
             except Exception as e:
+                self._generating = False
                 logger.error(f"TTS Error: {e}")
 
     def stop(self):
@@ -677,6 +721,26 @@ class TTSWorker(QThread):
             self.playback_worker.stop()
         self.quit()
         self.wait()
+
+    def retire(self):
+        """
+        Stop without blocking the caller: the thread drops the sentence it is synthesising and
+        then deletes itself. stop() holds the GUI until that sentence is done, which takes
+        minutes while the server is still loading the voice model.
+        """
+        self.is_running = False
+        self.discard_current = True
+        self.queue.put(None)
+        self.playback_worker.stop()
+        _RETIRED_WORKERS.add(self)
+        self.finished.connect(self._on_retired)
+        if not self.isRunning():
+            self._on_retired()
+
+    def _on_retired(self):
+        if self in _RETIRED_WORKERS:
+            _RETIRED_WORKERS.discard(self)
+            self.deleteLater()
 
 class _AudioChunk:
     __slots__ = ("file_path", "text", "message_id", "persist", "is_poison")
@@ -734,10 +798,18 @@ class PipelinedTTSWorker(QThread):
         self.qwen = None
         self.eleven = None
 
+        self._generating = False
+        self._playing = False
+
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._audio_buffer: Optional[asyncio.Queue] = None
         self._producer_task: Optional[asyncio.Task] = None
         self._player_task: Optional[asyncio.Task] = None
+
+    def _idle(self):
+        """Nothing queued, being synthesised or playing: the next sentence is heard only when done."""
+        return (not self._generating and not self._playing and self.text_queue.empty()
+                and (self._audio_buffer is None or self._audio_buffer.empty()))
 
     def _ensure_tts_engines(self):
         if self._tts_engines_initialized:
@@ -769,10 +841,15 @@ class PipelinedTTSWorker(QThread):
         raw_sentences = re.split(r'(?<=[.!?])\s+', text)
         current_chunk = ""
         max_chunk_len = 450
+        split_lead = self.tts_method in SLOW_TTS_METHODS and self._idle()
 
         def _enqueue(chunk_text):
+            nonlocal split_lead
             if chunk_text:
-                self.text_queue.put((chunk_text, message_id))
+                pieces = split_clauses(chunk_text) if split_lead else [chunk_text]
+                split_lead = False
+                for piece in pieces:
+                    self.text_queue.put((piece, message_id))
 
         for sentence in raw_sentences:
             sentence = sentence.strip()
@@ -1012,6 +1089,7 @@ class PipelinedTTSWorker(QThread):
                 continue
 
             output_file = None
+            self._generating = True
             try:
                 output_file = await asyncio.wait_for(
                     self._generate_wav(text),
@@ -1026,6 +1104,8 @@ class PipelinedTTSWorker(QThread):
             except Exception as e:
                 logger.error(f"[PipelinedTTS] TTS generation error: {e}", exc_info=True)
                 continue
+            finally:
+                self._generating = False
 
             if self.discard_current:
                 logger.info(f"[PipelinedTTS] producer: discarding '{text[:40]}...' (interrupted)")
@@ -1111,7 +1191,11 @@ class PipelinedTTSWorker(QThread):
                 continue
 
             logger.info(f"[PipelinedTTS] player: playing '{chunk.text[:40]}...'")
-            await self._play_audio_with_lipsync(chunk.file_path, chunk.persist)
+            self._playing = True
+            try:
+                await self._play_audio_with_lipsync(chunk.file_path, chunk.persist)
+            finally:
+                self._playing = False
 
             if self._audio_buffer.empty() and self.text_queue.empty() and not self._interrupt_flag.is_set():
                 try:

@@ -8,8 +8,11 @@ SOW_SERVER_TOKEN. A pairing string (sow://host:port#token=...&fp=...) fills all 
 """
 import asyncio
 import hashlib
+import io
+import ipaddress
 import logging
 import os
+import socket
 import ssl
 import threading
 import time
@@ -17,6 +20,7 @@ from urllib.parse import parse_qs, urlsplit
 
 import httpx
 import numpy as np
+import soundfile as sf
 
 from app.configuration import configuration
 
@@ -189,6 +193,36 @@ def capabilities(force: bool = False) -> dict | None:
     return conn._caps
 
 
+def _compress_audio() -> bool:
+    """
+    Opus instead of wav for TTS and STT audio: a tenth of the size, for a server reached over
+    the network. On the same computer wav is quicker (encoding costs ~30 ms per sentence).
+    """
+    if _on_this_computer(urlsplit(connection().base_url).hostname or ""):
+        return False
+    return "opus" in ((capabilities() or {}).get("audio_formats") or [])
+
+
+def _on_this_computer(host: str) -> bool:
+    """Loopback, or an address of one of this computer's interfaces (a LAN-shared server)."""
+    try:
+        addr = socket.getaddrinfo(host, None)[0][4][0]
+        if ipaddress.ip_address(addr).is_loopback:
+            return True
+        with socket.socket(socket.AF_INET6 if ":" in addr else socket.AF_INET) as sock:
+            sock.bind((addr, 0))     # only succeeds for an address this computer owns
+        return True
+    except (OSError, ValueError):
+        return False
+
+
+def _reencode(data: bytes, fmt: str, subtype: str) -> bytes:
+    samples, sr = sf.read(io.BytesIO(data), dtype="float32")
+    out = io.BytesIO()
+    sf.write(out, samples, sr, format=fmt, subtype=subtype)
+    return out.getvalue()
+
+
 def status() -> dict | None:
     try:
         with connection().client(timeout=5.0) as c:
@@ -245,12 +279,16 @@ async def ensure_rvc_model(rvc_file: str) -> str:
 
 async def speech(engine: str, text: str, voice: str = "", options: dict | None = None) -> tuple[bytes, int]:
     """POST /v1/audio/speech; returns (wav bytes, sample rate)."""
-    body = {"model": engine, "input": text, "voice": voice or "", "response_format": "wav",
+    fmt = "opus" if await asyncio.to_thread(_compress_audio) else "wav"
+    body = {"model": engine, "input": text, "voice": voice or "", "response_format": fmt,
             "sow": options or {}}
     async with connection().async_client(timeout=300.0) as c:
         r = await c.post("/v1/audio/speech", json=body)
         _raise_for(r)
-        return r.content, int(r.headers.get("x-sow-sample-rate", "0") or 0)
+        data = r.content
+        if fmt == "opus":
+            data = await asyncio.to_thread(_reencode, data, "WAV", "PCM_16")
+        return data, int(r.headers.get("x-sow-sample-rate", "0") or 0)
 
 
 async def preload_tts(engine: str, voice: str = "", options: dict | None = None):
@@ -294,8 +332,12 @@ def transcribe(wav: bytes, model: str = "small", language: str | None = None) ->
     data = {"model": model}
     if language:
         data["language"] = language
+    upload = ("speech.wav", wav, "audio/wav")
+    # Browser uploads (webm/ogg) go through as they are.
+    if wav[:4] == b"RIFF" and _compress_audio():
+        upload = ("speech.ogg", _reencode(wav, "OGG", "OPUS"), "audio/ogg")
     with connection().client(timeout=120.0) as c:
-        r = c.post("/v1/audio/transcriptions", files={"file": ("speech.wav", wav, "audio/wav")}, data=data)
+        r = c.post("/v1/audio/transcriptions", files={"file": upload}, data=data)
         _raise_for(r)
         return r.json().get("text", "")
 

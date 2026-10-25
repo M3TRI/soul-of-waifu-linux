@@ -4,6 +4,7 @@ Bearer token, proxies OpenAI-style and /sow/* requests to the llama and speech s
 merges their capabilities and manages GGUF models in the shared models volume.
 """
 import asyncio
+import json
 import logging
 import os
 import re
@@ -49,12 +50,12 @@ async def auth(request: Request, call_next):
     return await call_next(request)
 
 
-async def proxy(request: Request, base: str, path: str | None = None) -> Response:
+async def proxy(request: Request, base: str, path: str | None = None, content: bytes | None = None) -> Response:
     """Stream the request to base+path and the answer back (SSE and uploads included)."""
     url = base + (path or request.url.path)
     headers = {k: v for k, v in request.headers.items() if k.lower() not in HOP_HEADERS}
-    upstream = client.build_request(request.method, url, params=request.query_params,
-                                    headers=headers, content=request.stream())
+    upstream = client.build_request(request.method, url, params=request.query_params, headers=headers,
+                                    content=request.stream() if content is None else content)
     try:
         resp = await client.send(upstream, stream=True)
     except httpx.TransportError as e:
@@ -114,7 +115,45 @@ async def status():
 
 # --- LLM -----------------------------------------------------------------------------------
 
-@app.api_route("/v1/chat/completions", methods=["POST"])
+# Role-play chats start with the character's greeting and put narrator/NPC lines in a row, but
+# the chat templates of Mistral Nemo and Gemma 3 (and their fine-tunes) raise "roles must
+# alternate user/assistant" on that. Neighbouring messages of one role are merged and a chat
+# that opens with the assistant gets a user turn first, for every model alike.
+START_TURN = "[Start a new chat]"
+MERGEABLE_ROLES = {"system", "user", "assistant"}
+
+
+def alternate_roles(messages: list) -> list:
+    out = []
+    for m in messages:
+        prev = out[-1] if out else None
+        if (prev is not None and isinstance(m, dict) and m.get("role") in MERGEABLE_ROLES
+                and prev.get("role") == m.get("role") and set(m) <= {"role", "content", "name"}
+                and set(prev) <= {"role", "content", "name"}
+                and isinstance(m.get("content"), str) and isinstance(prev.get("content"), str)):
+            out[-1] = {**prev, "content": f"{prev['content']}\n\n{m['content']}"}
+        else:
+            out.append(m)
+    first = next((i for i, m in enumerate(out) if not (isinstance(m, dict) and m.get("role") == "system")), None)
+    if first is not None and isinstance(out[first], dict) and out[first].get("role") == "assistant":
+        out.insert(first, {"role": "user", "content": START_TURN})
+    return out
+
+
+@app.post("/v1/chat/completions")
+async def chat_completions(request: Request):
+    body = await request.body()
+    try:
+        data = json.loads(body)
+        if isinstance(data.get("messages"), list):
+            fixed = alternate_roles(data["messages"])
+            if fixed != data["messages"]:
+                body = json.dumps({**data, "messages": fixed}).encode()
+    except (ValueError, AttributeError):
+        pass    # not JSON: llama-server answers with its own error
+    return await proxy(request, LLAMA_URL, content=body)
+
+
 @app.api_route("/v1/completions", methods=["POST"])
 @app.api_route("/v1/models", methods=["GET"])
 async def llm_proxy(request: Request):
@@ -173,19 +212,42 @@ async def llm_catalog():
 JOBS: dict[str, dict] = {}
 
 
+DOWNLOAD_ATTEMPTS = 8
+
+
 async def _download(job: dict, url: str, dest: str, sha256: str | None):
     import hashlib
     part = dest + ".part"
     try:
         digest = hashlib.sha256()
-        async with client.stream("GET", url, follow_redirects=True, timeout=httpx.Timeout(60.0)) as r:
-            r.raise_for_status()
-            job["total"] = int(r.headers.get("content-length", 0))
-            with open(part, "wb") as f:
-                async for chunk in r.aiter_bytes(1 << 20):
-                    f.write(chunk)
-                    digest.update(chunk)
-                    job["done"] += len(chunk)
+        with open(part, "wb") as f:
+            for attempt in range(DOWNLOAD_ATTEMPTS):
+                # HuggingFace's CDN drops long transfers now and then: continue from the byte
+                # where it stopped (the digest runs on in order), from scratch if Range is ignored.
+                headers = {"Range": f"bytes={job['done']}-"} if job["done"] else {}
+                try:
+                    async with client.stream("GET", url, headers=headers, follow_redirects=True,
+                                             timeout=httpx.Timeout(60.0)) as r:
+                        r.raise_for_status()
+                        if job["done"] and r.status_code != 206:
+                            f.seek(0)
+                            f.truncate()
+                            digest, job["done"] = hashlib.sha256(), 0
+                        if not job["done"]:
+                            job["total"] = int(r.headers.get("content-length", 0))
+                        async for chunk in r.aiter_bytes(1 << 20):
+                            f.write(chunk)
+                            digest.update(chunk)
+                            job["done"] += len(chunk)
+                    if not job["total"] or job["done"] >= job["total"]:
+                        break
+                except httpx.TransportError as e:
+                    if attempt == DOWNLOAD_ATTEMPTS - 1:
+                        raise
+                    logger.warning("download of %s broke at %d bytes (%s), resuming", job["file"], job["done"], e)
+                    await asyncio.sleep(min(30, 2 ** attempt))
+        if job["total"] and job["done"] != job["total"]:
+            raise ValueError(f"incomplete download: {job['done']} of {job['total']} bytes")
         if sha256 and digest.hexdigest() != sha256:
             raise ValueError("sha256 mismatch")
         os.replace(part, dest)

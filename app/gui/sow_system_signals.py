@@ -1051,7 +1051,7 @@ class Soul_Of_Waifu_System(QtCore.QObject):
     async def first_render_messages(self, character_name):
         self.chat_widget.setUpdatesEnabled(False)
         self.ui.scrollArea_chat.setVisible(False)
-        QApplication.processEvents()
+        await asyncio.sleep(0)   # not processEvents(): it re-enters the qasync loop
 
         for i in reversed(range(self.chat_container.count())):
             item = self.chat_container.itemAt(i)
@@ -1107,7 +1107,7 @@ class Soul_Of_Waifu_System(QtCore.QObject):
         self.ui.scrollArea_chat.setVisible(True)
         self.ui.scrollArea_chat.update()
 
-        QApplication.processEvents()
+        await asyncio.sleep(0)   # not processEvents(): it re-enters the qasync loop
     
     async def render_messages(self, character_name):
         self.chat_widget.setUpdatesEnabled(False)
@@ -1216,7 +1216,7 @@ class Soul_Of_Waifu_System(QtCore.QObject):
         self.chat_widget.setUpdatesEnabled(True)
         self.chat_container.update()
         self.ui.scrollArea_chat.setVisible(True)
-        QApplication.processEvents()
+        await asyncio.sleep(0)   # not processEvents(): it re-enters the qasync loop
 
     def draw_circle_avatar(self, avatar_path, current_sow_system_mode):
         target_size = 54

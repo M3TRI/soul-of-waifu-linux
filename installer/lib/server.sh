@@ -165,7 +165,7 @@ download_model() {
         return 0
     fi
     header "$(t "Downloading $MODEL_FILE ($(gb "$MODEL_SIZE_MB"))" "Скачивание $MODEL_FILE ($(gb "$MODEL_SIZE_MB"))")"
-    curl -fL --retry 3 --progress-bar -C - -o "$dest.part" "$MODEL_URL"
+    curl -fL --retry 5 --retry-all-errors --retry-delay 3 --progress-bar -C - -o "$dest.part" "$MODEL_URL"
     if [ -n "$MODEL_SHA" ]; then
         info "$(t "Checking the file (sha256)..." "Проверка файла (sha256)...")"
         echo "$MODEL_SHA  $dest.part" | sha256sum -c --quiet || die "$(t "Checksum mismatch, the file is damaged." "Контрольная сумма не совпала, файл повреждён.")"

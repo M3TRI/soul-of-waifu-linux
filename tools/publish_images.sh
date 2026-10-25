@@ -12,10 +12,14 @@ FLAVOURS=("${@:-cu128 cu126 cpu}")
 # shellcheck disable=SC2206
 FLAVOURS=(${FLAVOURS[*]})
 
-docker build -f server/gateway/Dockerfile -t "$REPO/gateway:$TAG" .
+# No provenance/SBOM attestations: docker pushes the attestation manifest in parallel with the
+# image manifest it refers to, and the GitLab registry rejects it (MANIFEST_BLOB_UNKNOWN).
+BUILD=(docker build --provenance=false --sbom=false)
+
+"${BUILD[@]}" -f server/gateway/Dockerfile -t "$REPO/gateway:$TAG" .
 docker push "$REPO/gateway:$TAG"
 for torch in "${FLAVOURS[@]}"; do
-    docker build -f server/speech/Dockerfile --build-arg TORCH="$torch" -t "$REPO/speech:$TAG-$torch" .
+    "${BUILD[@]}" -f server/speech/Dockerfile --build-arg TORCH="$torch" -t "$REPO/speech:$TAG-$torch" .
     docker push "$REPO/speech:$TAG-$torch"
     # The speech images are ~17 GB each; keep only what this machine runs.
     [ "$torch" = "${KEEP_TORCH:-cu128}" ] || docker rmi "$REPO/speech:$TAG-$torch"

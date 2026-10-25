@@ -305,8 +305,27 @@ async def _apply_rvc(samples: np.ndarray, sr: int, opts: RvcOptions):
         return await asyncio.to_thread(run)
 
 
-async def synthesize(req: SpeechRequest) -> tuple[bytes, int, float]:
-    """Run the engine (and RVC if asked); return a 16-bit wav, its rate and duration."""
+# Rates Opus accepts; anything else (RVC models output 32 or 40 kHz) is resampled up.
+OPUS_RATES = (8000, 12000, 16000, 24000, 48000)
+
+
+def encode(samples: np.ndarray, sr: int, fmt: str) -> tuple[bytes, int]:
+    """16-bit wav, or Ogg/Opus (about a tenth of the size, for clients on a slow link)."""
+    buf = io.BytesIO()
+    if fmt == "opus":
+        if sr not in OPUS_RATES:
+            import torchaudio.functional as AF
+            target = next(r for r in OPUS_RATES if r >= sr) if sr < 48000 else 48000
+            samples = AF.resample(torch.from_numpy(samples), sr, target).numpy()
+            sr = target
+        sf.write(buf, samples, sr, format="OGG", subtype="OPUS")
+    else:
+        sf.write(buf, samples, sr, format="WAV", subtype="PCM_16")
+    return buf.getvalue(), sr
+
+
+async def synthesize(req: SpeechRequest, fmt: str = "wav") -> tuple[bytes, int, float]:
+    """Run the engine (and RVC if asked); return the encoded audio, its rate and duration."""
     engine = ENGINES.get(req.engine)
     if engine is None:
         raise TtsError(f"Unknown TTS engine: {req.engine}")
@@ -315,9 +334,9 @@ async def synthesize(req: SpeechRequest) -> tuple[bytes, int, float]:
     samples, sr = await engine(req)
     if req.rvc:
         samples, sr = await _apply_rvc(samples, sr, req.rvc)
-    buf = io.BytesIO()
-    sf.write(buf, samples, sr, format="WAV", subtype="PCM_16")
-    return buf.getvalue(), sr, len(samples) / sr
+    duration = len(samples) / sr
+    data, sr = await asyncio.to_thread(encode, samples, sr, fmt)
+    return data, sr, duration
 
 
 async def preload(req: SpeechRequest):

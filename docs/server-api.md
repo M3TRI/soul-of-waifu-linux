@@ -62,7 +62,8 @@ and compose healthchecks.
   "rvc": {"available": true, "models": ["Holo"]},
   "stt": {"available": true, "models": ["small"], "device": "cuda"},
   "embeddings": {"available": true, "model": "e5-small-en-ru"},
-  "emotions": {"available": true, "labels": ["admiration", "...", "sadness"]}
+  "emotions": {"available": true, "labels": ["admiration", "...", "sadness"]},
+  "audio_formats": ["wav", "opus"]
 }
 ```
 
@@ -111,7 +112,10 @@ about characters.
 
 - `model`: `xtts`, `kokoro`, `silero`, `qwen3`, `edge`. ElevenLabs stays on the client.
 - `rvc` is optional; when present the result goes through RVC with that model.
-- Response: `audio/wav` body (`response_format: "opus"` later, for remote links).
+- Response: `audio/wav` body, or `audio/ogg` (Opus) with `response_format: "opus"`: about a
+  tenth of the size. The client asks for Opus when the server is on another computer and
+  `audio_formats` lists it; on the same computer wav is quicker (Opus encoding costs ~30 ms).
+  Opus takes 8/12/16/24/48 kHz, so RVC output at 32/40 kHz is resampled to 48 kHz.
 - Headers: `X-Sow-Sample-Rate`, `X-Sow-Duration`.
 
 `PUT /sow/voices/refs/<sha256>` - upload a reference clip (Qwen3 cloning, XTTS custom
@@ -127,7 +131,7 @@ first sentence (the client already does this outside the per-sentence timeout).
 ### STT
 
 `POST /v1/audio/transcriptions` - multipart: `file` (wav, 16 kHz mono from the client's
-VAD segment), `model` (`small`, `medium`, `large-v3-turbo`), optional `language`.
+VAD segment, Ogg/Opus from a remote client; any container PyAV decodes is accepted), `model` (`small`, `medium`, `large-v3-turbo`), optional `language`.
 Response: `{"text": "..."}`.
 
 ### Embeddings

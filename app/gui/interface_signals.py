@@ -2646,7 +2646,7 @@ class InterfaceSignals():
                     self.translations.get("tool_using_label", "using {tool}...").format(tool=call["name"])
                 )
                 try:
-                    QApplication.processEvents()
+                    await asyncio.sleep(0)   # not processEvents(): it re-enters the qasync loop
                     start_time = time.time()
                     
                     tool_result = await self.tool_registry.execute(call["name"], call["arguments"], tool_context)
@@ -3547,8 +3547,7 @@ class InterfaceSignals():
 
             if hasattr(self, 'chat_tts_worker') and self.chat_tts_worker is not None:
                 try:
-                    self.chat_tts_worker.stop()
-                    self.chat_tts_worker.deleteLater()
+                    self.chat_tts_worker.retire()
                     self.chat_tts_worker = None
                     logger.info("Chat TTS Worker stopped on chat exit.")
                 except Exception as e:
@@ -4834,7 +4833,7 @@ class InterfaceSignals():
 
         chat_view.chat_messages_widget.setUpdatesEnabled(True)
         chat_view.scroll_area.setUpdatesEnabled(True)
-        QtWidgets.QApplication.processEvents()
+        await asyncio.sleep(0)   # not processEvents(): it re-enters the qasync loop
 
         new_max = scrollbar.maximum()
         height_diff = new_max - old_max
@@ -5562,6 +5561,17 @@ class InterfaceSignals():
         """
         Configures the main interface tab by uploading a list of characters and setting up a user profile.
         """
+        # Switching to the main page from here fires on_stacked_widget_changed, which schedules
+        # set_main_tab again when it leaves a chat; one rebuild at a time is enough.
+        if getattr(self, "_main_tab_busy", False):
+            return
+        self._main_tab_busy = True
+        try:
+            await self._set_main_tab()
+        finally:
+            self._main_tab_busy = False
+
+    async def _set_main_tab(self):
         DiscordRPCManager().set_menu_presence()
         
         if hasattr(self, '_folder_header_widget') and self._folder_header_widget:
@@ -5654,7 +5664,7 @@ class InterfaceSignals():
             self.ui.welcome_label_2.setText(greeting_text)
 
             self.ui.stackedWidget.setCurrentWidget(self.ui.main_characters_page)
-            QApplication.processEvents()
+            await asyncio.sleep(0)   # not processEvents(): it re-enters the qasync loop
 
             characters = character_data.get('character_list', {})
 
@@ -17072,8 +17082,7 @@ class InterfaceSignals():
 
         if hasattr(self, 'chat_tts_worker') and self.chat_tts_worker:
             try:
-                self.chat_tts_worker.stop()
-                self.chat_tts_worker.deleteLater()
+                self.chat_tts_worker.retire()
             except Exception:
                 pass
             self.chat_tts_worker = None
@@ -21870,7 +21879,7 @@ Image prompt:"""
         self.ensure_header_image_on_top()
         
         self.chat_widget.setUpdatesEnabled(True)
-        QApplication.processEvents() 
+        await asyncio.sleep(0)   # not processEvents(): it re-enters the qasync loop
         
         new_max = scrollbar.maximum()
         height_diff = new_max - old_max
@@ -22033,7 +22042,7 @@ Image prompt:"""
         self.ui.scrollArea_chat.setUpdatesEnabled(True)
         self.chat_widget.setUpdatesEnabled(True)
         
-        QApplication.processEvents()
+        await asyncio.sleep(0)   # not processEvents(): it re-enters the qasync loop
         
         scrollbar = self.ui.scrollArea_chat.verticalScrollBar()
         scrollbar.setValue(scrollbar.maximum())

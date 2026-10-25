@@ -117,6 +117,7 @@ async def capabilities():
         "stt": {"available": True, "models": stt.MODELS, "device": gpu_or_cpu},
         "embeddings": {"available": True, "model": nlp.EMBEDDING_MODEL},
         "emotions": {"available": True, "labels": nlp.EMOTIONS},
+        "audio_formats": list(AUDIO_FORMATS),
     }
 
 
@@ -159,9 +160,12 @@ class SpeechIn(BaseModel):
     sow: SowOptions = Field(default_factory=SowOptions)
 
 
+AUDIO_FORMATS = {"wav": "audio/wav", "opus": "audio/ogg"}
+
+
 def _speech_request(body: SpeechIn) -> tts.SpeechRequest:
-    if body.response_format != "wav":
-        raise ValueError("Only response_format=wav is supported")
+    if body.response_format not in AUDIO_FORMATS:
+        raise ValueError(f"response_format must be one of: {', '.join(AUDIO_FORMATS)}")
     return tts.SpeechRequest(
         engine=body.model, text=body.input, voice=body.voice, language=body.sow.language,
         rvc=tts.RvcOptions(**body.sow.rvc.model_dump()) if body.sow.rvc else None,
@@ -171,8 +175,8 @@ def _speech_request(body: SpeechIn) -> tts.SpeechRequest:
 
 @app.post("/v1/audio/speech")
 async def speech(body: SpeechIn):
-    wav, sr, duration = await tts.synthesize(_speech_request(body))
-    return Response(wav, media_type="audio/wav",
+    data, sr, duration = await tts.synthesize(_speech_request(body), body.response_format)
+    return Response(data, media_type=AUDIO_FORMATS[body.response_format],
                     headers={"X-Sow-Sample-Rate": str(sr), "X-Sow-Duration": f"{duration:.3f}"})
 
 
