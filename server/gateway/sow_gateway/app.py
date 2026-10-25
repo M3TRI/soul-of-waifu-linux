@@ -190,6 +190,10 @@ async def _download(job: dict, url: str, dest: str, sha256: str | None):
             raise ValueError("sha256 mismatch")
         os.replace(part, dest)
         job["status"] = "done"
+    except asyncio.CancelledError:
+        job["status"] = "cancelled"
+        if os.path.exists(part):
+            os.remove(part)
     except Exception as e:
         job.update(status="failed", error=f"{type(e).__name__}: {e}")
         if os.path.exists(part):
@@ -222,6 +226,16 @@ async def llm_download(request: Request):
                           "started": time.time()}
     job["task"] = asyncio.create_task(_download(job, url, dest, sha256))
     return {"job": job_id}
+
+
+@app.delete("/sow/jobs/{job_id}")
+async def job_cancel(job_id: str):
+    job = JOBS.get(job_id)
+    if job is None:
+        return error(404, "not_found", "No such job")
+    if job["status"] == "running":
+        job["task"].cancel()
+    return {"status": "ok"}
 
 
 @app.get("/sow/jobs/{job_id}")

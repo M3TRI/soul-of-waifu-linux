@@ -7,12 +7,18 @@ SOW_CONF_DIR=${XDG_CONFIG_HOME:-$HOME/.config}/soul-of-waifu
 SERVER_ENV=$SOW_CONF_DIR/server.env
 SERVER_DATA=$SOW_HOME/server
 SOW_PORT_DEFAULT=8765
+SOW_REGISTRY=registry.gitlab.projectmiku.cc/opensrc/soul-of-waifu-linux
 
 # compose_cmd ARGS...: docker compose with this install's project, env file and GPU overlay.
 compose_cmd() {
     local files=(-f "$APP_DIR/server/compose.yaml") overlay
     overlay=$(sed -n 's/^SOW_GPU_OVERLAY=//p' "$SERVER_ENV" 2>/dev/null)
     [ -n "$overlay" ] && files+=(-f "$APP_DIR/server/$overlay")
+    SOW_COMMIT=$(git -C "$APP_DIR" rev-parse HEAD 2>/dev/null || echo dev)
+    # Same server code, same image: the tag is the git tree hash of server/.
+    SOW_IMAGE_TAG=$(git -C "$APP_DIR" rev-parse --short=12 HEAD:server 2>/dev/null || echo dev)
+    SOW_IMAGE_REPO=$SOW_REGISTRY
+    export SOW_COMMIT SOW_IMAGE_TAG SOW_IMAGE_REPO
     dk compose --project-name soul-of-waifu --project-directory "$APP_DIR/server" \
         --env-file "$SERVER_ENV" "${files[@]}" "$@"
 }
@@ -62,7 +68,7 @@ make_tls() {
     local dir=$SERVER_DATA/tls san
     mkdir -p "$dir"
     if [[ "$SERVER_HOST" =~ ^[0-9.]+$ ]]; then san="IP:$SERVER_HOST,IP:127.0.0.1"; else san="DNS:$SERVER_HOST,IP:127.0.0.1"; fi
-    if [ -f "$dir/cert.pem" ] && openssl x509 -in "$dir/cert.pem" -noout -ext subjectAltName 2>/dev/null | grep -q "${SERVER_HOST}"; then
+    if [ -f "$dir/cert.pem" ] && [[ "$(openssl x509 -in "$dir/cert.pem" -noout -ext subjectAltName 2>/dev/null)" == *"$SERVER_HOST"* ]]; then
         return 0
     fi
     info "$(t "Creating a TLS certificate for $SERVER_HOST" "Создаётся TLS-сертификат для $SERVER_HOST")"
@@ -131,12 +137,11 @@ ask_xtts_licence() {
 
 deploy_server() {
     header "$(t "Starting the server" "Запуск сервера")"
-    explain "$(t "Downloading the llama.cpp image and building the voice image. The first time this takes" \
-                 "Скачивается образ llama.cpp и собирается образ голосовых движков. В первый раз это занимает")" \
-            "$(t "15-30 minutes and about 20 GB of disk space (/var/lib/docker)." \
-                 "15-30 минут и около 20 ГБ места на диске (/var/lib/docker).")"
-    compose_cmd pull llama
-    compose_cmd build
+    explain "$(t "Downloading the server images (about 8 GB; they take about 20 GB in /var/lib/docker)." \
+                 "Скачиваются образы сервера (около 8 ГБ; в /var/lib/docker займут около 20 ГБ).")" \
+            "$(t "Without prebuilt images for this version they are built here instead: 15-30 minutes." \
+                 "Если готовых образов для этой версии нет, они собираются здесь: 15-30 минут.")"
+    get_images
     compose_cmd up -d
     info "$(t "Waiting for the server to answer..." "Ожидание ответа сервера...")"
     local scheme=http i
@@ -169,6 +174,17 @@ download_model() {
     ok "$MODEL_FILE"
 }
 
+# Server images: pull the prebuilt ones, build locally when that fails (offline registry,
+# an unpublished version, a modified server/ folder).
+get_images() {
+    compose_cmd pull llama
+    if [ -n "$(git -C "$APP_DIR" status --porcelain -- server 2>/dev/null)" ] || ! compose_cmd pull gateway speech; then
+        info "$(t "No prebuilt images for this version: building them here (15-30 minutes)." \
+                  "Готовых образов для этой версии нет: они собираются здесь (15-30 минут).")"
+        compose_cmd build
+    fi
+}
+
 pairing_string() {
     local s
     s="sow://$SERVER_HOST:$SERVER_PORT#token=$(env_get SOW_TOKEN)"
@@ -195,4 +211,58 @@ install_server_cli() {
 exec bash "$APP_DIR/installer/sow-server.sh" "\$@"
 EOF
     chmod +x "$HOME/.local/bin/sow-server"
+}
+
+# Daily automatic update of a server-only install (opt-in): a systemd user timer running
+# installer/update.sh, the same updater as 'sow-server update'.
+ask_auto_update() {
+    AUTO_UPDATE=no
+    header "$(t "Automatic updates" "Автоматические обновления")"
+    if [ "$DOCKER_ACCESS" != yes ]; then
+        explain "$(t "Automatic updates need Docker access without sudo; update with 'sow-server update' instead." \
+                     "Для автообновления нужен доступ к Docker без sudo; обновляйте командой 'sow-server update'.")"
+        return 0
+    fi
+    explain "$(t "Once a day the server can check this branch for a new version and update itself" \
+                 "Раз в сутки сервер может проверять новую версию и обновляться сам")" \
+            "$(t "(git fast-forward, rebuild, restart: a few seconds without the server)." \
+                 "(git fast-forward, пересборка, перезапуск: несколько секунд без сервера).")"
+    ask_yn "$(t "Update the server automatically?" "Обновлять сервер автоматически?")" n && AUTO_UPDATE=yes
+    return 0
+}
+
+install_auto_update() {
+    local units=$HOME/.config/systemd/user
+    mkdir -p "$units"
+    cat > "$units/sow-server-update.service" <<UNIT
+[Unit]
+Description=Soul of Waifu server update
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/env bash $APP_DIR/installer/update.sh
+UNIT
+    cat > "$units/sow-server-update.timer" <<UNIT
+[Unit]
+Description=Daily Soul of Waifu server update
+
+[Timer]
+OnCalendar=daily
+RandomizedDelaySec=1h
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+UNIT
+    run systemctl --user daemon-reload
+    run systemctl --user enable --now sow-server-update.timer
+    # User timers run only while the user is logged in, unless lingering is on.
+    if [ "$(loginctl show-user "$USER" -p Linger --value 2>/dev/null)" != yes ]; then
+        explain "$(t "This user is not set to 'linger', so the timer runs only while you are logged in." \
+                     "Для этого пользователя не включён режим 'linger', поэтому таймер работает, только пока вы вошли в систему.")"
+        if ask_yn "$(t "Enable lingering for $USER (loginctl enable-linger)?" "Включить linger для $USER (loginctl enable-linger)?")" y; then
+            as_root loginctl enable-linger "$USER"
+        fi
+    fi
+    ok "$(t "Daily server updates are on (systemctl --user list-timers)." "Ежедневное обновление сервера включено (systemctl --user list-timers).")"
 }

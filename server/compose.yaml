@@ -8,14 +8,18 @@ services:
     build:
       context: ..
       dockerfile: server/gateway/Dockerfile
-    image: sow-gateway:${SOW_VERSION:-dev}
+    # Prebuilt in the project's registry (tag = git tree hash of server/); built locally
+    # under the same name when the pull fails.
+    image: ${SOW_IMAGE_REPO:-sow}/gateway:${SOW_IMAGE_TAG:-dev}
     restart: unless-stopped
     user: "${SOW_UID:-1000}:${SOW_GID:-1000}"
     environment:
       SOW_TOKEN: ${SOW_TOKEN:?SOW_TOKEN is not set}
       SOW_TLS_CERT: ${SOW_TLS_CERT:-}
       SOW_TLS_KEY: ${SOW_TLS_KEY:-}
-      SOW_SERVER_VERSION: ${SOW_VERSION:-dev}
+      # git commit of the folder the stack was started from (compose_cmd sets it); the app
+      # compares it with its own to warn about an outdated server.
+      SOW_SERVER_VERSION: ${SOW_COMMIT:-dev}
     ports:
       - "${SOW_BIND:-127.0.0.1}:${SOW_PORT:-8765}:8765"
     volumes:
@@ -42,7 +46,7 @@ services:
       dockerfile: server/speech/Dockerfile
       args:
         TORCH: ${SOW_TORCH:-cpu}
-    image: sow-speech:${SOW_VERSION:-dev}-${SOW_TORCH:-cpu}
+    image: ${SOW_IMAGE_REPO:-sow}/speech:${SOW_IMAGE_TAG:-dev}-${SOW_TORCH:-cpu}
     restart: unless-stopped
     user: "${SOW_UID:-1000}:${SOW_GID:-1000}"
     environment:

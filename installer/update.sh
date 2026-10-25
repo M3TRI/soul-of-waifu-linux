@@ -17,16 +17,30 @@ cd "$APP_DIR"
 
 [ -d .git ] || die "$(t "This copy was not installed with git; run the installer again to update." \
                         "Эта копия установлена не через git; для обновления запустите установщик заново.")"
-upstream=$(git rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null) \
-    || die "$(t "The branch has no upstream to update from." "У ветки нет источника для обновления.")"
 
-header "$(t "Downloading the update" "Загрузка обновления")"
-git fetch --quiet "${upstream%%/*}"
-old=$(git rev-parse HEAD)
-new=$(git rev-parse "$upstream")
-if [ "$old" = "$new" ]; then
-    ok "$(t "Already up to date." "Обновлений нет.")"
-    exit 0
+# Phase 2 runs from the freshly merged copy of this script (see the exec below), so the
+# new version's own update steps apply right away.
+if [ "${1:-}" = --after-merge ]; then
+    old=$2 new=$3
+else
+    upstream=$(git rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null) \
+        || die "$(t "The branch has no upstream to update from." "У ветки нет источника для обновления.")"
+
+    header "$(t "Downloading the update" "Загрузка обновления")"
+    git fetch --quiet "${upstream%%/*}"
+    # Installs from the docker-split preview follow main once it has been merged there.
+    remote=${upstream%%/*}
+    if [ "$upstream" = "$remote/docker-split" ] && git rev-parse -q --verify "$remote/main" >/dev/null \
+        && git merge-base --is-ancestor "$remote/docker-split" "$remote/main"; then
+        git branch --quiet --set-upstream-to="$remote/main"
+        upstream=$remote/main
+        info "$(t "This install now follows the main branch." "Эта установка теперь следит за веткой main.")"
+    fi
+    old=$(git rev-parse HEAD)
+    new=$(git rev-parse "$upstream")
+    if [ "$old" = "$new" ]; then
+        ok "$(t "Already up to date." "Обновлений нет.")"
+        exit 0
 fi
 git log --format='   %s' "$old..$new"
 
@@ -39,8 +53,12 @@ if ! git diff --quiet HEAD; then
 fi
 git merge --ff-only --quiet "$new"
 ok "$(t "Program updated." "Программа обновлена.")"
+exec bash "$APP_DIR/installer/update.sh" --after-merge "$old" "$new"
+fi
 
-if git diff --quiet "$old" "$new" -- installer/client-requirements.txt; then
+if [ ! -x .venv/bin/python ]; then
+    :   # server-only install: no app environment here
+elif git diff --quiet "$old" "$new" -- installer/client-requirements.txt; then
     info "$(t "Python packages unchanged." "Python-пакеты без изменений.")"
 else
     header "$(t "Updating Python packages" "Обновление Python-пакетов")"
@@ -50,16 +68,23 @@ fi
 
 # The server of this computer, if it was installed from this folder.
 if [ -f "$SERVER_ENV" ] && grep -qF "$APP_DIR/installer/sow-server.sh" "$HOME/.local/bin/sow-server" 2>/dev/null; then
-    if git diff --quiet "$old" "$new" -- server; then
+    # Without direct Docker access: sudo asks for the password in a terminal (sow-server
+    # update); from the app's Update button there is no terminal, so it must not prompt.
+    if ! docker info >/dev/null 2>&1; then
+        if [ -t 0 ]; then DOCKER_CMD=(sudo docker); else DOCKER_CMD=(sudo -n docker); fi
+    fi
+    if ! dk info >/dev/null 2>&1; then
+        warn "$(t "The server needs a restart for the new version, but Docker needs sudo here: run 'sow-server update' in a terminal." \
+                  "Серверу нужен перезапуск под новую версию, но Docker здесь требует sudo: выполните в терминале 'sow-server update'.")"
+    elif git diff --quiet "$old" "$new" -- server; then
+        # Only the reported version changes: compose recreates just the gateway.
+        compose_cmd up -d
         info "$(t "Server unchanged." "Сервер без изменений.")"
-    elif docker info >/dev/null 2>&1; then
+    else
         header "$(t "Updating the server" "Обновление сервера")"
-        compose_cmd build
+        get_images
         compose_cmd up -d
         ok "$(t "Server restarted." "Сервер перезапущен.")"
-    else
-        warn "$(t "The server needs an update, but Docker needs sudo here: run 'sow-server update' in a terminal." \
-                  "Серверу нужно обновление, но Docker здесь требует sudo: выполните в терминале 'sow-server update'.")"
     fi
 fi
 

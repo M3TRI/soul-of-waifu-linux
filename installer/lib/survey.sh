@@ -146,13 +146,17 @@ survey_containers() {
 
 survey_net() {
     NET_OK=no
+    if ! command -v curl >/dev/null 2>&1; then
+        NET_OK=unknown
+        return 0
+    fi
     curl -fsI --max-time 8 https://huggingface.co >/dev/null 2>&1 && NET_OK=yes
 }
 
 port_busy() {
     # port_busy PORT -> 0 if something listens on it.
     if command -v ss >/dev/null 2>&1; then
-        ss -ltnH "sport = :$1" 2>/dev/null | grep -q .
+        [ -n "$(ss -ltnH "sport = :$1" 2>/dev/null)" ]
     else
         (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null
     fi
@@ -160,8 +164,11 @@ port_busy() {
 
 survey_all() {
     # Best effort: a missing tool (podman, lspci, pactl...) must not abort the installer.
-    local saved
-    saved=$(set +o)
+    # The option state is read from $- and shopt, not from $(set +o): bash turns errexit
+    # off inside command substitutions, so that would restore it as "off".
+    local had_e=no had_pipefail=no
+    [[ $- == *e* ]] && had_e=yes
+    shopt -qo pipefail && had_pipefail=yes
     set +e +o pipefail
     survey_os
     survey_hw
@@ -169,7 +176,9 @@ survey_all() {
     survey_desktop
     survey_containers
     survey_net
-    eval "$saved"
+    [ "$had_e" = yes ] && set -e
+    [ "$had_pipefail" = yes ] && set -o pipefail
+    return 0
 }
 
 # version_ge A B -> 0 when A >= B (dotted versions).
@@ -207,5 +216,9 @@ print_summary() {
     if [ "$GPU_VENDOR" = nvidia ]; then
         row "NVIDIA Container Toolkit" "${NVIDIA_CTK_VERSION:-$(t "not installed" "не установлен")}$([ "$NVIDIA_CDI_SPEC" = yes ] && echo ", CDI")"
     fi
-    row "$(t "Internet" "Интернет")" "$([ "$NET_OK" = yes ] && t "OK" "есть" || t "huggingface.co not reachable" "huggingface.co недоступен")"
+    case "$NET_OK" in
+        yes) row "$(t "Internet" "Интернет")" "$(t "OK" "есть")" ;;
+        unknown) row "$(t "Internet" "Интернет")" "$(t "not checked (no curl yet)" "не проверен (пока нет curl)")" ;;
+        *) row "$(t "Internet" "Интернет")" "$(t "huggingface.co not reachable" "huggingface.co недоступен")" ;;
+    esac
 }

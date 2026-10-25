@@ -3,12 +3,16 @@
 # before doing it; nothing here runs without a "yes".
 
 # pkg_install PKG...: installs distro packages with the distro's package manager.
+# apt, dnf and zypper run non-interactively with no stdin: they must not swallow what the
+# user types ahead for the installer's next question (debconf reads the terminal otherwise).
+# pacman stays interactive: it asks before replacing conflicting packages.
 pkg_install() {
     case "$PKG" in
         pacman) as_root pacman -S --needed "$@" ;;
-        apt) as_root apt-get update && as_root apt-get install -y "$@" ;;
-        dnf) as_root dnf install -y "$@" ;;
-        zypper) as_root zypper --non-interactive install "$@" ;;
+        apt) as_root env DEBIAN_FRONTEND=noninteractive apt-get update </dev/null \
+                && as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y "$@" </dev/null ;;
+        dnf) as_root dnf install -y "$@" </dev/null ;;
+        zypper) as_root zypper --non-interactive install "$@" </dev/null ;;
         *) return 1 ;;
     esac
 }
@@ -16,8 +20,9 @@ pkg_install() {
 # Tools the installer itself needs. Package names are the same on all four families.
 ensure_tools() {
     local missing=() tool
-    for tool in curl tar openssl; do
-        command -v "$tool" >/dev/null 2>&1 || missing+=("$tool")
+    for tool in curl tar openssl awk; do
+        # awk comes as gawk on every family
+        command -v "$tool" >/dev/null 2>&1 || missing+=("${tool/#awk/gawk}")
     done
     [ "${#missing[@]}" = 0 ] && return 0
     header "$(t "Required tools" "Необходимые утилиты")"
@@ -156,6 +161,9 @@ install_nvidia_toolkit() {
             pkg_install nvidia-container-toolkit ;;
         suse)
             as_root zypper --non-interactive ar https://nvidia.github.io/libnvidia-container/stable/rpm/nvidia-container-toolkit.repo
+            # The user agreed to NVIDIA's repository; accept its signing key as NVIDIA's
+            # instructions do (non-interactive zypper rejects unknown keys).
+            as_root zypper --non-interactive --gpg-auto-import-keys refresh nvidia-container-toolkit
             pkg_install nvidia-container-toolkit ;;
     esac
 }
@@ -213,4 +221,32 @@ ensure_nvidia_containers() {
         return 0
     fi
     return 1
+}
+
+# Minimal Debian installs with a root password have no sudo; the installer needs it for
+# system steps and Docker. Offer the usual setup (sudo + the sudo group) with root's
+# password, then a re-login.
+ensure_sudo() {
+    [ "$(id -u)" = 0 ] || command -v sudo >/dev/null 2>&1 && return 0
+    header "sudo"
+    explain "$(t "This system has no sudo; the installer needs it to install packages and run Docker." \
+                 "В системе нет sudo; установщику он нужен, чтобы ставить пакеты и запускать Docker.")" \
+            "$(t "It can install sudo and add $USER to the '$1' group (root's password is asked once)." \
+                 "Он может поставить sudo и добавить $USER в группу '$1' (пароль root спросят один раз).")" \
+            "$(t "After that log out and in again, and run the installer once more." \
+                 "После этого выйдите из системы, войдите снова и запустите установщик ещё раз.")"
+    ask_yn "$(t "Install sudo and add $USER to '$1'?" "Поставить sudo и добавить $USER в '$1'?")" n \
+        || die "$(t "Install sudo and run the installer again." "Поставьте sudo и запустите установщик снова.")"
+    local install
+    case "$PKG" in
+        apt) install="apt-get update && apt-get install -y sudo" ;;
+        dnf) install="dnf install -y sudo" ;;
+        zypper) install="zypper --non-interactive install sudo" ;;
+        pacman) install="pacman -S --needed --noconfirm sudo" ;;
+        *) die "$(t "Install sudo by hand." "Поставьте sudo вручную.")" ;;
+    esac
+    as_root bash -c "$install && usermod -aG $1 $USER"
+    ok "$(t "Done. Log out and in again, then run the installer once more." \
+            "Готово. Выйдите из системы, войдите снова и запустите установщик ещё раз.")"
+    exit 0
 }

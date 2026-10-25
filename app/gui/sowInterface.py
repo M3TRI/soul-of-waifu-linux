@@ -2183,6 +2183,64 @@ class Ui_MainWindow(object):
         sys_layout.addWidget(card_tts_rules)
 
         # -----------------------------------------------------------------
+        # CARD: Soul of Waifu server (Linux port): the LLM, voices, speech
+        # recognition and memory run there; paired with a sow:// string
+        # -----------------------------------------------------------------
+        card_sow_server, l_sow_server = create_glass_card(self.translations.get("sow_server_title", "Soul of Waifu Server"))
+        l_sow_server.addLayout(create_section_header(self.translations.get("section_sow_server", "CONNECTION")))
+
+        self.label_sow_server_status = QtWidgets.QLabel(self.translations.get("sow_server_checking", "Checking the server..."))
+        self.label_sow_server_status.setFont(font_input)
+        self.label_sow_server_status.setWordWrap(True)
+        self.label_sow_server_status.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.label_sow_server_status.setStyleSheet("color: #909090; padding-left: 5px;")
+        l_sow_server.addWidget(self.label_sow_server_status)
+
+        sow_server_row = QtWidgets.QHBoxLayout()
+        sow_server_row.setSpacing(15)
+        self.lineEdit_sow_server_pairing = QtWidgets.QLineEdit()
+        self.lineEdit_sow_server_pairing.setFont(font_input)
+        self.lineEdit_sow_server_pairing.setFixedHeight(40)
+        self.lineEdit_sow_server_pairing.setEchoMode(QtWidgets.QLineEdit.EchoMode.Password)
+        self.lineEdit_sow_server_pairing.setPlaceholderText("sow://host:port#token=...")
+        self.lineEdit_sow_server_pairing.setToolTip(self.translations.get(
+            "sow_server_pairing_tooltip",
+            "Pairing string of the server: run 'sow-server pair' on the computer that runs it."))
+        self.lineEdit_sow_server_pairing.setObjectName("lineEdit_sow_server_pairing")
+
+        sow_server_button_style = """
+            QPushButton {
+                background-color: rgba(59, 130, 246, 0.15);
+                color: #93C5FD;
+                border: 1px solid rgba(59, 130, 246, 0.3);
+                border-radius: 6px;
+                padding: 0 15px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: rgba(59, 130, 246, 0.3);
+                border: 1px solid rgba(59, 130, 246, 0.5);
+                color: #FFFFFF;
+            }
+            QPushButton:disabled { color: #555555; border: 1px solid #333333; background-color: transparent; }
+        """
+        self.pushButton_sow_server_connect = QtWidgets.QPushButton(self.translations.get("sow_server_connect_btn", "Connect"))
+        self.pushButton_sow_server_check = QtWidgets.QPushButton(self.translations.get("sow_server_check_btn", "Check"))
+        for button, name in ((self.pushButton_sow_server_connect, "pushButton_sow_server_connect"),
+                             (self.pushButton_sow_server_check, "pushButton_sow_server_check")):
+            button.setFont(font_input)
+            button.setFixedHeight(40)
+            button.setCursor(QtGui.QCursor(QtCore.Qt.CursorShape.PointingHandCursor))
+            button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            button.setObjectName(name)
+            button.setStyleSheet(sow_server_button_style)
+        sow_server_row.addWidget(self.lineEdit_sow_server_pairing, 1)
+        sow_server_row.addWidget(self.pushButton_sow_server_connect)
+        sow_server_row.addWidget(self.pushButton_sow_server_check)
+        l_sow_server.addLayout(sow_server_row)
+        sys_layout.addWidget(card_sow_server)
+
+        # -----------------------------------------------------------------
         # CARD 3: Hardware Diagnostics
         # -----------------------------------------------------------------
         card_hw, l_hw = create_glass_card(self.hardware_spec_title)

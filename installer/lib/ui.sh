@@ -102,10 +102,19 @@ pause_enter() {
     read_tty _
 }
 
-# as_root CMD...: runs a command as root after showing it. sudo asks for the password itself.
+# as_root CMD...: runs a command as root after showing it. sudo asks for the password
+# itself; without sudo (minimal Debian with a root password) su asks for root's password.
 as_root() {
-    printf '   %s$ %s%s\n' "$C_DIM" "sudo $*" "$C_RESET"
-    if [ "$(id -u)" = 0 ]; then "$@"; else sudo "$@"; fi
+    if [ "$(id -u)" = 0 ]; then
+        printf '   %s# %s%s\n' "$C_DIM" "$*" "$C_RESET"
+        "$@"
+    elif command -v sudo >/dev/null 2>&1; then
+        printf '   %s$ %s%s\n' "$C_DIM" "sudo $*" "$C_RESET"
+        sudo "$@"
+    else
+        printf '   %s$ %s%s\n' "$C_DIM" "su -c '$*'" "$C_RESET"
+        su root -c "$(printf '%q ' "$@")" <"$TTY"
+    fi
 }
 
 # run CMD...: shows and runs an unprivileged command.

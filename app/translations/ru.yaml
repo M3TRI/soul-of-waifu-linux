@@ -2201,6 +2201,25 @@ update_available_title: Обновление доступно
 update_running: Обновление... По завершении программа перезапустится сама.
 update_done: Обновлено. Перезапуск...
 update_failed: Обновление не удалось, подробности ниже. Ваши данные не затронуты.
+sow_server_title: Сервер Soul of Waifu
+section_sow_server: ПОДКЛЮЧЕНИЕ
+sow_server_checking: Проверка сервера...
+sow_server_online: 'Подключено: {url}'
+sow_server_offline: 'Нет связи: {url}'
+sow_server_model: 'Модель: {model}'
+sow_server_connect_btn: Подключиться
+sow_server_check_btn: Проверить
+sow_server_pairing_tooltip: "Строка подключения к серверу: выполните 'sow-server pair' на компьютере, где он работает."
+sow_server_pair_failed: Не удалось подключиться
+sow_server_pair_ok: Подключено к серверу
+tts_engine_server_offline: Сервер Soul of Waifu недоступен
+tts_engine_unavailable: Недоступно на сервере
+tts_engine_unavailable_short: недоступно
+status_download_on_server: 'Скачано на сервер и выбрано: {model}'
+sow_server_outdated: "сервер старее программы: выполните 'sow-server update' на его компьютере"
+sow_server_outdated_title: Серверу нужно обновление
+tts_reason_licence: При установке сервера не принята лицензия XTTSv2 (Coqui CPML); чтобы её принять, запустите установщик ещё раз.
+tts_reason_vram: Нужно около {need:.1f} ГБ видеопамяти, а голосовой профиль, выбранный при установке, даёт {budget:.1f} ГБ. Чтобы выбрать профиль побольше, запустите установщик ещё раз.
 update_btn: Обновления
 update_current_version: 'Текущая версия: v2.5.1'
 update_engine_tooltip: Скачайте и установите последние версии llama.cpp для выбранного бэкенда.

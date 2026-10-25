@@ -28,6 +28,10 @@ info "$(t "Collecting information about the system..." "Сбор сведени�
 survey_all
 print_summary
 
+case "$OS_FAMILY" in
+    arch|fedora) ensure_sudo wheel ;;
+    *) ensure_sudo sudo ;;
+esac
 [ "$ARCH" = x86_64 ] || die "$(t "Only x86-64 is supported for now." "Пока поддерживается только x86-64.")"
 [ "$OS_FAMILY" != unknown ] || warn "$(t "Unknown distribution: system packages will have to be installed by hand." \
                                        "Неизвестный дистрибутив: системные пакеты придётся ставить вручную.")"
@@ -36,8 +40,10 @@ header "$(t "What to install" "Что установить")"
 choose "$(t "Choose the installation type" "Выберите вариант установки")" 1 \
     "$(t "Everything on this computer (app + server)" "Всё на этом компьютере (программа + сервер)")" \
     "$(t "Only the server, for other computers on the network" "Только сервер, для других компьютеров в сети")" \
-    "$(t "Only the app, connecting to an existing server" "Только программа, подключение к уже работающему серверу")"
+    "$(t "Only the app, connecting to an existing server" "Только программа, подключение к уже работающему серверу")" \
+    "$(t "Remove Soul of Waifu" "Удалить Soul of Waifu")"
 MODE=$CHOICE
+[ "$MODE" = 4 ] && exec bash "$APP_DIR/installer/uninstall.sh"
 
 if [ "$MODE" = 3 ]; then
     header "$(t "Plan" "План")"
@@ -106,6 +112,8 @@ if [ "$MODE" = 1 ]; then
     fi
 fi
 if [ "$MODE" = 1 ] && [ "$SHARE_LAN" = no ]; then ask_network local; else ask_network lan; fi
+AUTO_UPDATE=no
+[ "$MODE" = 2 ] && ask_auto_update
 
 # Disk space: images + model.
 need_mb=$((20 * 1024 + ${MODEL_SIZE_MB:-0}))
@@ -161,6 +169,7 @@ deploy_server
 download_model
 
 if [ "$MODE" = 2 ]; then
+    [ "$AUTO_UPDATE" = yes ] && install_auto_update
     print_pairing
     ok "$(t "Done." "Готово.")"
 else

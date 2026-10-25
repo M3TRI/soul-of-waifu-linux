@@ -74,6 +74,8 @@ pick_model() {
     local ids=() labels=() urls=() shas=() sizes=() id name size vram url sha note note_ru
     while IFS=$'\t' read -r id name size vram url sha note note_ru; do
         [ "$vram" -le "$LLM_BUDGET_MB" ] || continue
+        # On the processor speed, not memory, is the limit: models above ~8B are too slow.
+        [ "$BACKEND" = cpu ] && [ "$size" -gt 5000 ] && continue
         ids+=("$id") urls+=("$url") shas+=("$sha") sizes+=("$size")
         labels+=("$(printf '%-30s %s %5s %s, %s %5s %s  %s' "$name" "$(t file файл)" "$(mb_to_gb "$size")" "$(t GB ГБ)" \
             "$([ "$BACKEND" = cpu ] && t RAM ОЗУ || echo VRAM)" "$(mb_to_gb "$vram")" "$(t GB ГБ)" "$C_DIM$(t "$note" "$note_ru")$C_RESET")")
@@ -95,8 +97,12 @@ pick_model() {
         MODEL_ID=""
         return 0
     fi
-    # Default: the largest model that fits (the catalog is ordered by size).
-    local default=${#ids[@]}
+    # Default: the largest model that fits (the catalog is ordered by size); on the
+    # processor the 4B one, which still answers at a usable speed.
+    local default=${#ids[@]} i
+    if [ "$BACKEND" = cpu ]; then
+        for i in "${!ids[@]}"; do [ "${ids[$i]}" = qwen3-4b-2507 ] && default=$((i + 1)); done
+    fi
     labels+=("$(t "Do not download a model now" "Не скачивать модель сейчас")")
     choose "$(t "Which model should be downloaded?" "Какую модель скачать?")" "$default" "${labels[@]}"
     if [ "$CHOICE" -gt "${#ids[@]}" ]; then

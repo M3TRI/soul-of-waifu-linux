@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # Soul of Waifu one-command installer:
-#   curl -fsSL https://gitlab.projectmiku.cc/opensrc/soul-of-waifu-linux/-/raw/docker-split/install.sh | bash
+#   curl -fsSL https://gitlab.projectmiku.cc/opensrc/soul-of-waifu-linux/-/raw/main/install.sh | bash
 # Downloads the project into ~/.local/share/soul-of-waifu/app (or uses this checkout) and
 # starts the interactive installer, which asks before every change to the system.
 set -euo pipefail
 
 REPO=https://gitlab.projectmiku.cc/opensrc/soul-of-waifu-linux
 # Branch this installer belongs to; the one-command install clones it.
-BRANCH=${SOW_BRANCH:-docker-split}
+BRANCH=${SOW_BRANCH:-main}
 
 # Run from a checkout: use it as is.
 src=${BASH_SOURCE[0]:-}

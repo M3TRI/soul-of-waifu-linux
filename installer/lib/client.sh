@@ -18,6 +18,11 @@ client_packages() {
     fi
     ask_yn "$(t "Install them with $PKG?" "Установить их через $PKG?")" y \
         || die "$(t "The app cannot run without them." "Без них программа не запустится.")"
+    if [ "$PKG" = apt ]; then
+        # Package names (t64 renames) are resolved against fresh package lists.
+        as_root env DEBIAN_FRONTEND=noninteractive apt-get update </dev/null
+        missing=$(missing_packages)
+    fi
     # shellcheck disable=SC2086  # the list is meant to be split into package names
     if [ "$PKG" = pacman ]; then as_root pacman -Syu --needed $missing; else pkg_install $missing; fi
 }
@@ -55,6 +60,8 @@ client_pair() {
     local pairing=$1
     (cd "$APP_DIR" && .venv/bin/python -c "
 import sys
+from app.utils import user_data
+user_data.setup()   # the data folder the settings are written to may not exist yet
 from app.utils import sow_server
 sow_server.save_pairing(sys.argv[1])
 caps = sow_server.capabilities(force=True)

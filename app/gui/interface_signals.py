@@ -44,7 +44,7 @@ from PyQt6.QtWidgets import (
 
 from app.gui.character_ai_assistant import CharacterAIAssistantDialog
 from app.utils.discord_rpc import DiscordRPCManager
-from app.utils import sow_server
+from app.utils import sow_server, updater
 from app.utils.ai_clients.local_server_manager import LocalServerManager
 from app.utils.ai_clients.local_endpoint import LocalEndpointConfig, BUILTIN_PORT
 from app.utils.ai_clients.prompt_engine import (
@@ -9366,6 +9366,87 @@ class InterfaceSignals():
         else:
             self.configuration_settings.update_main_setting("flash_attention_status", False)
 
+    # === SOUL OF WAIFU SERVER (Linux port) ===
+    def initialize_sow_server_settings(self):
+        QtCore.QTimer.singleShot(2000, self.on_pushButton_sow_server_check_clicked)
+
+    def on_pushButton_sow_server_check_clicked(self):
+        asyncio.create_task(self.refresh_sow_server_status())
+
+    async def refresh_sow_server_status(self):
+        """Status line of the server card: address, GPU, loaded model, or why it is offline."""
+        self.ui.pushButton_sow_server_check.setEnabled(False)
+        try:
+            caps = await asyncio.to_thread(sow_server.capabilities, True)
+            status = await asyncio.to_thread(sow_server.status) if caps else None
+        finally:
+            self.ui.pushButton_sow_server_check.setEnabled(True)
+        url = sow_server.connection().base_url
+        if not caps:
+            self.ui.label_sow_server_status.setText(
+                "● " + self.translations.get("sow_server_offline", "Not connected: {url}").format(url=url))
+            self.ui.label_sow_server_status.setStyleSheet("color: #F87171; padding-left: 5px;")
+            return
+        gpu = (status or {}).get("gpu") or caps.get("gpu") or {}
+        parts = [self.translations.get("sow_server_online", "Connected: {url}").format(url=url)]
+        if gpu.get("name"):
+            parts.append(f"{gpu['name']}, {gpu.get('vram_total_mb', 0) / 1024:.1f} GB VRAM")
+        llm = ((status or {}).get("llm") or {}).get("loaded") or (caps.get("llm", {}).get("models") or ["-"])[0]
+        parts.append(self.translations.get("sow_server_model", "Model: {model}").format(model=llm))
+        relation = await asyncio.to_thread(updater.compare_with_server, caps.get("server_version"))
+        color = "#4ADE80"
+        if relation == "server_older":
+            color = "#FBBF24"
+            parts.append(self.translations.get(
+                "sow_server_outdated", "the server is older than the app: run 'sow-server update' on its computer"))
+            if not getattr(self, "_sow_server_outdated_shown", False):
+                self._sow_server_outdated_shown = True
+                sow_toast(
+                    parent=self.main_window,
+                    title=self.translations.get("sow_server_outdated_title", "The server needs an update"),
+                    text=self.translations.get(
+                        "sow_server_outdated", "the server is older than the app: run 'sow-server update' on its computer"),
+                    msg_type="warning",
+                    duration=8000
+                )
+        self.ui.label_sow_server_status.setText("● " + " · ".join(parts))
+        self.ui.label_sow_server_status.setStyleSheet(f"color: {color}; padding-left: 5px;")
+
+    def on_pushButton_sow_server_connect_clicked(self):
+        asyncio.create_task(self.pair_sow_server())
+
+    async def pair_sow_server(self):
+        text = self.ui.lineEdit_sow_server_pairing.text().strip()
+        if not text:
+            return
+        self.ui.pushButton_sow_server_connect.setEnabled(False)
+        try:
+            error = await asyncio.to_thread(sow_server.test_pairing, text)
+        finally:
+            self.ui.pushButton_sow_server_connect.setEnabled(True)
+        if error:
+            sow_toast(
+                parent=self.main_window,
+                title=self.translations.get("sow_server_pair_failed", "Could not connect"),
+                text=error,
+                msg_type="error",
+                duration=7000
+            )
+            return
+        # Saved only once the server answered: a typo never breaks a working connection.
+        sow_server.save_pairing(text)
+        self.ui.lineEdit_sow_server_pairing.clear()
+        self.initialize_external_llm_settings()
+        self._reset_external_llm_connection()
+        sow_toast(
+            parent=self.main_window,
+            title=self.translations.get("sow_server_pair_ok", "Connected to the server"),
+            text=sow_server.connection().base_url,
+            msg_type="success",
+            duration=5000
+        )
+        await self.refresh_sow_server_status()
+
     # === EXTERNAL OPENAI-COMPATIBLE SERVER ===
     def initialize_external_llm_settings(self):
         external = bool(self.configuration_settings.get_main_setting("local_llm_external"))
@@ -11725,6 +11806,7 @@ class InterfaceSignals():
             item = QtWidgets.QListWidgetItem(name)
             item.setIcon(QtGui.QIcon(icon_path))
             sidebar_menu.addItem(item)
+        self._mark_server_tts_engines(sidebar_menu)
 
         sidebar_layout.addWidget(sidebar_menu)
         main_layout.addWidget(sidebar_frame)
@@ -11757,6 +11839,39 @@ class InterfaceSignals():
 
         dialog.setLayout(main_layout)
         return dialog
+
+    def _mark_server_tts_engines(self, sidebar_menu):
+        """
+        Grey out engines the server cannot run right now (licence not accepted, outside the
+        install-time VRAM profile, server offline) with the server's reason as the tooltip.
+        They stay selectable so their settings can still be viewed.
+        """
+        server_ids = {"XTTSv2": "xtts", "Edge TTS": "edge", "Kokoro": "kokoro",
+                      "Silero (RU)": "silero", "Qwen-3 TTS": "qwen3"}
+        caps = sow_server.capabilities()
+        engines = {t.get("engine"): t for t in (caps or {}).get("tts", [])}
+        for row in range(sidebar_menu.count()):
+            item = sidebar_menu.item(row)
+            engine_id = server_ids.get(item.text())
+            if engine_id is None:
+                continue
+            info = engines.get(engine_id)
+            if caps is None:
+                reason = self.translations.get("tts_engine_server_offline", "The Soul of Waifu server is not reachable")
+            elif info is None or not info.get("available"):
+                code = (info or {}).get("reason_code")
+                if code == "licence":
+                    reason = self.translations.get("tts_reason_licence", "The XTTSv2 licence (Coqui CPML) was not accepted when the server was installed; run the installer again to accept it.")
+                elif code == "vram":
+                    reason = self.translations.get("tts_reason_vram", "Needs about {need:.1f} GB of video memory; the voice profile chosen at install time allows {budget:.1f} GB. Run the installer again to pick a bigger profile.").format(
+                        need=info.get("need_mb", 0) / 1024, budget=(info.get("budget_mb") or 0) / 1024)
+                else:
+                    reason = (info or {}).get("reason") or self.translations.get("tts_engine_unavailable", "Not available on the server")
+            else:
+                continue
+            item.setText(f"{item.text()} — {self.translations.get('tts_engine_unavailable_short', 'unavailable')}")
+            item.setForeground(QtGui.QColor("#6B6B6B"))
+            item.setToolTip(reason)
 
     def set_initial_sidebar_selection(self, current_text_to_speech, sidebar_menu):
         engine_map = {

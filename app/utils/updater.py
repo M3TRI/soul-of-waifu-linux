@@ -37,3 +37,24 @@ def check() -> dict | None:
     except (OSError, subprocess.SubprocessError) as e:
         logger.warning(f"Update check failed: {e}")
         return None
+
+
+def compare_with_server(server_commit: str | None) -> str:
+    """
+    How the server's version (its git commit, from /sow/capabilities) relates to this
+    app: "same", "server_older", "app_older" or "unknown" (dev build, not a git checkout,
+    or a commit this checkout has not fetched).
+    """
+    if not server_commit or server_commit == "dev" or not os.path.isdir(os.path.join(APP_DIR, ".git")):
+        return "unknown"
+    try:
+        head = _git("rev-parse", "HEAD")
+        if server_commit == head:
+            return "same"
+        for older, newer, verdict in ((server_commit, head, "server_older"), (head, server_commit, "app_older")):
+            if subprocess.run(["git", "-C", APP_DIR, "merge-base", "--is-ancestor", older, newer],
+                              capture_output=True, timeout=10).returncode == 0:
+                return verdict
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return "unknown"

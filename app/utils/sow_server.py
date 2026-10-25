@@ -52,6 +52,25 @@ def parse_pairing(text: str) -> tuple[str, str, str]:
     return f"{scheme}://{host}:{parts.port or 8765}", token, fp
 
 
+def test_pairing(text: str) -> str | None:
+    """Try a pairing string without saving it: None if the server answers, else the reason."""
+    try:
+        url, token, fp = parse_pairing(text)
+    except ValueError as e:
+        return str(e)
+    conn = _Connection.__new__(_Connection)
+    conn.base_url, conn.token, conn.fingerprint = url, token, fp
+    conn._caps, conn._caps_at, conn._ssl = None, 0.0, None
+    try:
+        with conn.client(timeout=8.0) as c:
+            _raise_for(c.get("/sow/capabilities"))
+        return None
+    except ServerError as e:
+        return str(e) if e.code != "unauthorized" or "certificate" in str(e) else "Wrong token"
+    except (httpx.HTTPError, OSError) as e:
+        return f"{url} is not reachable: {e}"
+
+
 def save_pairing(text: str):
     url, token, fp = parse_pairing(text)
     settings = configuration.ConfigurationSettings()
@@ -238,6 +257,35 @@ async def preload_tts(engine: str, voice: str = "", options: dict | None = None)
     body = {"model": engine, "input": "", "voice": voice or "", "sow": options or {}}
     async with connection().async_client(timeout=900.0) as c:
         _raise_for(await c.post("/sow/tts/preload", json=body))
+
+
+# --- LLM models ----------------------------------------------------------------------------
+
+def start_model_download(url: str) -> str:
+    """Ask the server to download a GGUF from huggingface.co; returns the job id."""
+    with connection().client(timeout=15.0) as c:
+        r = c.post("/sow/llm/download", json={"url": url})
+        _raise_for(r)
+        return r.json()["job"]
+
+
+def job(job_id: str) -> dict:
+    with connection().client(timeout=10.0) as c:
+        r = c.get(f"/sow/jobs/{job_id}")
+        _raise_for(r)
+        return r.json()
+
+
+def cancel_job(job_id: str):
+    with connection().client(timeout=10.0) as c:
+        _raise_for(c.delete(f"/sow/jobs/{job_id}"))
+
+
+def server_mode() -> bool:
+    """Local LLM goes to the paired server (the split edition's normal setup)."""
+    settings = configuration.ConfigurationSettings()
+    base = (settings.get_main_setting("local_llm_base_url") or "").rstrip("/")
+    return bool(settings.get_main_setting("local_llm_external")) and base.startswith(connection().base_url)
 
 
 # --- STT, embeddings, emotions -------------------------------------------------------------

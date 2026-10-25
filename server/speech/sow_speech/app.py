@@ -93,7 +93,7 @@ def _fit(engine: str) -> dict:
     need = MIN_ENGINE_MB.get(engine, 0)
     if DEVICE != "cuda" or BUDGET_MB is None or need + RESIDENT_MB <= BUDGET_MB:
         return {"available": True}
-    return {"available": False,
+    return {"available": False, "reason_code": "vram", "need_mb": need + RESIDENT_MB, "budget_mb": BUDGET_MB,
             "reason": f"needs about {(need + RESIDENT_MB) / 1024:.1f} GB of video memory, the voice profile "
                       f"chosen at install time allows {BUDGET_MB / 1024:.1f} GB (re-run the installer to change it)"}
 
@@ -103,7 +103,7 @@ async def capabilities():
     gpu_or_cpu = "cuda" if DEVICE == "cuda" else "cpu"
     xtts = _fit("xtts")
     if os.environ.get("COQUI_TOS_AGREED") != "1":
-        xtts = {"available": False, "reason": "Coqui CPML licence not accepted"}
+        xtts = {"available": False, "reason_code": "licence", "reason": "Coqui CPML licence not accepted"}
     return {
         "gpu": _gpu(),
         "tts": [

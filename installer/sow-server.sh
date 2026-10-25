@@ -19,6 +19,7 @@ case "${1:-status}" in
     restart) compose_cmd restart ;;
     logs) shift; compose_cmd logs --tail 200 -f "$@" ;;
     pair) print_pairing ;;
-    update) compose_cmd pull llama && compose_cmd build && compose_cmd up -d ;;
+    # Same updater as the app's Update button: git fast-forward, then rebuild what changed.
+    update) exec bash "$APP_DIR/installer/update.sh" ;;
     *) sed -n '2,3p' "$0" | sed 's/^# //'; exit 2 ;;
 esac
