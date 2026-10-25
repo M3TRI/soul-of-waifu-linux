@@ -61,10 +61,8 @@ tar -c --exclude=__pycache__ --exclude='assets/local_llm/*' --exclude='assets/rv
     assets app/font app/gui/icons app/utils/e5-small-en-ru app/utils/speech-to-text \
     app/utils/emotions app/utils/ai_clients/9b5ad71b2ce5302211f9c61530b329a4922fc6a4 \
     | tar -x -C "$STAGE"
-for d in app/cache app/data logs assets/local_llm assets/rvc_models; do
-    mkdir -p "$STAGE/$d"
-    touch "$STAGE/$d/.gitkeep"
-done
+# User data folders are created at run time as links into ~/.local/share/soul-of-waifu/data
+# (app/utils/user_data.py), so the tree ships none of them.
 
 # The exported tree has its own .gitignore: there only machine-local files are ignored.
 cat > "$STAGE/.gitignore" <<'EOF'
@@ -72,17 +70,18 @@ __pycache__/
 *.pyc
 *.part
 .venv/
-.soul/
-.soul_stage/
-Backups/
-logs/*
-!logs/.gitkeep
-app/cache/*
-!app/cache/.gitkeep
-assets/local_llm/*
-!assets/local_llm/.gitkeep
-assets/rvc_models/*
-!assets/rvc_models/.gitkeep
+# Links into the user data folder (app/utils/user_data.py)
+/.soul
+/.soul_stage
+/Backups
+/logs
+/app/cache
+/app/data
+/assets/local_llm
+/assets/rvc_models
+# Speech the app generated for playback (temporary)
+/app/voices/*_audio/*
+!/app/voices/*_audio/.gitkeep
 app/utils/e5-small-en-ru/model.safetensors
 app/utils/emotions/detector/pytorch_model.bin
 app/utils/ai_clients/backend/_temp/recommended_models_cache.json*

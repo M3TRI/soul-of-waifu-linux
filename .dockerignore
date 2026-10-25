@@ -1,0 +1,6 @@
+# Build context for server images is the repo root; only these paths are needed.
+*
+!server/
+!app/voices/calm_female.wav
+!app/voices/female.wav
+!app/voices/male.wav

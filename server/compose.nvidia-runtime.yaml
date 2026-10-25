@@ -1,0 +1,19 @@
+# Fallback for Docker versions without CDI: the NVIDIA runtime registered by
+# `nvidia-ctk runtime configure`. The installer uses compose.nvidia.yaml when CDI works.
+services:
+  llama:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+  speech:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

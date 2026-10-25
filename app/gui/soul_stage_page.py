@@ -22,7 +22,7 @@ from PyQt6.QtWidgets import (
     QDialog, QListWidget, QListWidgetItem, QMenu,
 )
 
-from app.gui.custom_widgets import SowSelectDialog, SowInputDialog, SowConfirmDialog, SceneFolderCard, sow_toast
+from app.gui.custom_widgets import SowSelectDialog, SowInputDialog, SowConfirmDialog, SceneFolderCard, sow_toast, show_window
 
 SOUL_STAGE_DIR = Path(".soul_stage")
 SCENES_FILE    = SOUL_STAGE_DIR / "scenes.json"
@@ -2859,7 +2859,7 @@ class InventoryPanel(QtWidgets.QDialog):
         new_panel = InventoryPanel(self.world_state, self._panel_parent)
         new_panel.item_used.connect(self.item_used)
         new_panel.item_dropped.connect(self.item_dropped)
-        new_panel.exec()
+        show_window(new_panel)
 
 class ChoicesBar(QFrame):
     choice_selected = pyqtSignal(str)

@@ -49,6 +49,47 @@ SLIDER_STYLE_DARK = """
 """
 
 
+_open_windows: dict = {}
+
+
+def show_window(dialog: QDialog, key=None) -> QDialog:
+    """
+    Show an editor or viewer without blocking the main window (upstream used exec(), which
+    locks the app until the dialog closes). key identifies the window: opening the same one
+    again brings the existing window to the front instead of stacking a copy. Dialogs that
+    return an answer (confirmations, inputs, choosers) keep exec().
+    """
+    if key is not None:
+        existing = _open_windows.get(key)
+        if existing is not None:
+            dialog.deleteLater()
+            existing.showNormal()
+            existing.raise_()
+            existing.activateWindow()
+            return existing
+        _open_windows[key] = dialog
+    dialog.setModal(False)
+    dialog.setWindowModality(Qt.WindowModality.NonModal)
+    if key is None:
+        # Dialogs without a parent would be garbage-collected once the opener returns.
+        key = id(dialog)
+        _open_windows[key] = dialog
+
+    def _closed(*_):
+        # Forget it at once (not on destroyed, which comes later): reopening right after
+        # closing must create a new window. accept()/reject() only hide a non-modal
+        # dialog, so free it as well.
+        if _open_windows.get(key) is dialog:
+            del _open_windows[key]
+        dialog.deleteLater()
+
+    dialog.finished.connect(_closed)
+    dialog.show()
+    dialog.raise_()
+    dialog.activateWindow()
+    return dialog
+
+
 def safe_paint(method):
     @functools.wraps(method)
     def wrapper(self, event):
@@ -879,7 +920,7 @@ class LorebookGatewayCard(QFrame):
                 import_method=self.import_method,
                 parent=self.window()
             )
-            dialog.exec()
+            show_window(dialog, ("gateway_preview", self.download_url))
  
 class SceneGatewayCard(QFrame):
     """
@@ -1088,7 +1129,7 @@ class SceneGatewayCard(QFrame):
                 import_method=self.import_method,
                 parent=self.window()
             )
-            dialog.exec()
+            show_window(dialog, ("gateway_preview", self.download_url))
 
 class GatewayPreviewDialog(QDialog):
     def __init__(self, title: str, author: str, description: str, download_url: str, asset_type: str, import_method, parent=None):

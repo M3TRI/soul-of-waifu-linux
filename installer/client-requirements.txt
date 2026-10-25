@@ -1,0 +1,44 @@
+# Python packages of the UI client: install_linux.sh's list without the ML stack (torch,
+# transformers, TTS engines, Whisper, RVC), which now runs in the server containers.
+# Same pins as install_linux.sh. live2d-py is installed separately (built with CMake < 4).
+numpy==1.26.4
+PyQt6==6.9.0
+PyQt6-WebEngine==6.9.0
+qasync==0.27.1
+beautifulsoup4
+mss
+ddgs
+pypdf
+python-docx
+discord.py
+PyNaCl
+davey
+pypresence
+pyautogui
+playwright
+openai==1.70.0
+mistralai==1.5.0
+edge-tts==7.3.1
+elevenlabs==1.52.0
+curl_cffi
+translators==6.0.1
+psutil==7.0.0
+GPUtil==1.4.0
+sounddevice==0.5.1
+soundfile==0.13.1
+pydub==0.25.1
+PyOpenGL==3.1.9
+scikit-learn==1.4.2
+scipy==1.13.1
+aiohttp==3.11.13
+requests==2.32.3
+tiktoken==0.11.0
+PyYAML==6.0.2
+pillow==11.3.0
+huggingface-hub==0.36.0
+PyAudio
+python-multipart
+fastapi==0.139.0
+uvicorn==0.51.0
+httpx
+onnxruntime

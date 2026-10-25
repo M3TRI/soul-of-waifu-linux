@@ -2187,11 +2187,33 @@ tts_selector_xttsv2_male: Male
 tts_voicing_mode_label: Voicing Mode
 typingIndicator_text: Thinking
 unknown: Unknown
-update_available_body: 'A new version is available: '
-update_available_close: Close
-update_available_info: Would you like to update the program?
-update_available_link: Go to GitHub
+update_available_body: Update available
+update_available_close: Later
+update_available_info: 'New changes: {n}'
+update_available_link: Update now
 update_available_title: Update Available
+update_running: Updating... The app restarts by itself when it is done.
+update_done: Updated. Restarting...
+update_failed: The update failed; details below. Your data is not affected.
+sow_server_title: Soul of Waifu Server
+section_sow_server: CONNECTION
+sow_server_checking: Checking the server...
+sow_server_online: 'Connected: {url}'
+sow_server_offline: 'Not connected: {url}'
+sow_server_model: 'Model: {model}'
+sow_server_connect_btn: Connect
+sow_server_check_btn: Check
+sow_server_pairing_tooltip: "Pairing string of the server: run 'sow-server pair' on the computer that runs it."
+sow_server_pair_failed: Could not connect
+sow_server_pair_ok: Connected to the server
+tts_engine_server_offline: The Soul of Waifu server is not reachable
+tts_engine_unavailable: Not available on the server
+tts_engine_unavailable_short: unavailable
+status_download_on_server: 'Downloaded to the server and selected: {model}'
+sow_server_outdated: "the server is older than the app: run 'sow-server update' on its computer"
+sow_server_outdated_title: The server needs an update
+tts_reason_licence: The XTTSv2 licence (Coqui CPML) was not accepted when the server was installed; run the installer again to accept it.
+tts_reason_vram: Needs about {need:.1f} GB of video memory; the voice profile chosen at install time allows {budget:.1f} GB. Run the installer again to pick a bigger profile.
 update_btn: Update
 update_current_version: 'Current version: v2.5.1'
 update_engine_tooltip: Download and install the latest llama.cpp binaries for the selected backend.

@@ -8,7 +8,8 @@ from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, HTTPExcept
 from fastapi.responses import HTMLResponse, FileResponse, PlainTextResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.security import APIKeyHeader, APIKeyQuery
-from faster_whisper import WhisperModel
+
+from app.utils import sow_server
 import uvicorn
 
 logger = logging.getLogger("WebBridge")
@@ -606,12 +607,9 @@ class WebBridge:
             conv_method = char_info.get("conversation_method", "Local LLM")
 
             def _transcribe():
-                if not hasattr(self, "_whisper_model"):
-                    self._whisper_model = WhisperModel("small", device="cpu", compute_type="int8")
-                
-                segments, info = self._whisper_model.transcribe(temp_path, beam_size=5)
-                full_text = "".join([segment.text for segment in segments])
-                return full_text.strip()
+                # Whisper runs on the Soul of Waifu server; it decodes the browser's webm/ogg.
+                with open(temp_path, "rb") as f:
+                    return sow_server.transcribe(f.read()).strip()
 
             try:
                 text = await asyncio.to_thread(_transcribe)

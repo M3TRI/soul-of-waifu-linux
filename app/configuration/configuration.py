@@ -12,6 +12,8 @@ import traceback
 from typing import Optional
 import copy
 
+from app.utils.user_data import CONFIG_DIR
+
 logger = logging.getLogger("Configuration")
 
 class ConfigurationSettings():
@@ -19,7 +21,7 @@ class ConfigurationSettings():
     A class that manages a JSON configuration file containing application settings and user data.
     """
     def __init__(self):
-        self.settings_path = "app/configuration/settings.json"
+        self.settings_path = os.path.join(CONFIG_DIR, "settings.json")
 
     def load_configuration(self):
         """
@@ -187,7 +189,7 @@ class ConfigurationAPI():
     A class for managing API tokens stored in a JSON configuration file.
     """
     def __init__(self):
-        self.api_tokens_path = "app/configuration/api.json"
+        self.api_tokens_path = os.path.join(CONFIG_DIR, "api.json")
 
     def load_configuration(self):
         """
@@ -239,12 +241,12 @@ class ConfigurationCharacters():
     _lock = threading.RLock()
 
     def __init__(self):
-        self.characters_path = "app/configuration/characters.json"
-        self.shards_dir = os.path.join("app", "configuration", "characters")
+        self.characters_path = os.path.join(CONFIG_DIR, "characters.json")
+        self.shards_dir = os.path.join(CONFIG_DIR, "characters")
         self.configuration_data = self.load_configuration()
 
     def _shard_abs(self, rel: str) -> str:
-        return os.path.join("app", "configuration", *rel.split("/"))
+        return os.path.join(CONFIG_DIR, *rel.split("/"))
 
     def _new_shard_rel(self, name: str) -> str:
         safe = re.sub(r'[^A-Za-z0-9_-]', '_', name).strip('_') or "character"

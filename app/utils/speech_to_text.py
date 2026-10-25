@@ -1,29 +1,51 @@
+import io
 import os
 import sys
-import torch
 import time
 import pyaudio
 import logging
 import numpy as np
+import soundfile as sf
 
 from PyQt6.QtCore import QThread, pyqtSignal
-from faster_whisper import WhisperModel
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
+from app.utils import sow_server
+
 logger = logging.getLogger("Speech-To-Text Module")
 
+SILERO_VAD_ONNX = os.path.join("app", "utils", "speech-to-text", "silero-vad", "src", "silero_vad",
+                               "data", "silero_vad.onnx")
 
-def autodetect_device() -> str:
-    if torch.cuda.is_available():
-        try:
-            gpu_name = torch.cuda.get_device_name(0)
-        except Exception:
-            gpu_name = "GPU"
-        logger.info(f"CUDA is available ({gpu_name}) -> using GPU")
-        return "cuda"
-    logger.info("CUDA is not available -> using CPU")
-    return "cpu"
+
+class SileroVad:
+    """
+    Silero VAD through onnxruntime, without torch: the ONNX model shipped in the silero-vad
+    folder, driven like its OnnxWrapper (state carried between calls, 64-sample context).
+    Takes 512-sample float32 chunks at 16 kHz and returns the speech probability.
+    """
+
+    CONTEXT = 64
+
+    def __init__(self, path=SILERO_VAD_ONNX):
+        import onnxruntime
+        opts = onnxruntime.SessionOptions()
+        opts.inter_op_num_threads = 1
+        opts.intra_op_num_threads = 1
+        self.session = onnxruntime.InferenceSession(path, providers=["CPUExecutionProvider"], sess_options=opts)
+        self.reset_states()
+
+    def reset_states(self):
+        self._state = np.zeros((2, 1, 128), dtype=np.float32)
+        self._context = np.zeros((1, self.CONTEXT), dtype=np.float32)
+
+    def __call__(self, chunk: np.ndarray, sr: int = 16000) -> float:
+        x = np.concatenate([self._context, chunk.reshape(1, -1).astype(np.float32)], axis=1)
+        out, self._state = self.session.run(None, {"input": x, "state": self._state,
+                                                   "sr": np.array(sr, dtype=np.int64)})
+        self._context = x[:, -self.CONTEXT:]
+        return float(out[0][0])
 
 
 class AudioInputWorker(QThread):
@@ -32,7 +54,7 @@ class AudioInputWorker(QThread):
     silence_detected_signal = pyqtSignal()
     audio_packet_ready = pyqtSignal(bytes)
 
-    def __init__(self, input_device_index=None, vad_device="auto"):
+    def __init__(self, input_device_index=None, vad_device="cpu"):
         super().__init__()
         self.input_device_index = input_device_index
         self.is_running = True
@@ -40,29 +62,11 @@ class AudioInputWorker(QThread):
         self.SAMPLE_RATE = 16000
         self.CHUNK_SIZE = 512
 
-        if vad_device == "auto":
-            vad_device = autodetect_device()
-        self.device = vad_device
-
-        logger.info("Loading Silero VAD model...")
+        # VAD runs here on the CPU (ONNX, ~1 ms per chunk): only speech segments go to the server.
+        logger.info("Loading Silero VAD model (ONNX)...")
         try:
-            silero_local_path = os.path.join(os.getcwd(), "app", "utils", "speech-to-text", "silero-vad")
-
-            if os.path.exists(silero_local_path):
-                self.model, utils = torch.hub.load(repo_or_dir=silero_local_path,
-                                                   model='silero_vad',
-                                                   source='local',
-                                                   force_reload=False)
-            else:
-                self.model, utils = torch.hub.load(repo_or_dir='snakers4/silero-vad',
-                                                   model='silero_vad',
-                                                   force_reload=False,
-                                                   trust_repo=True)
-
-            self.model = self.model.to(self.device)
-
-            self.get_speech_timestamps, _, _, _, _ = utils
-            logger.info(f"Silero VAD loaded successfully on {self.device}!")
+            self.model = SileroVad()
+            logger.info("Silero VAD loaded successfully!")
         except Exception as e:
             logger.error(f"Error loading Silero VAD: {e}")
             self.model = None
@@ -121,10 +125,7 @@ class AudioInputWorker(QThread):
 
                 audio_int16 = np.frombuffer(data, np.int16)
                 audio_float32 = audio_int16.astype(np.float32) / 32768.0
-                tensor = torch.from_numpy(audio_float32).to(self.device)
-
-                with torch.no_grad():
-                    speech_prob = self.model(tensor, self.SAMPLE_RATE).item()
+                speech_prob = self.model(audio_float32, self.SAMPLE_RATE)
 
                 rms = float(np.sqrt(np.mean(audio_float32 ** 2)))
                 volume = min(1.0, rms * 22.0)
@@ -221,48 +222,15 @@ class STTWorker(QThread):
         self.queue = []
         self.is_running = True
 
+        # Whisper runs on the Soul of Waifu server; device and compute type are its business.
         self.model_size = model_size
-        self.device = device
-        self.compute_type = compute_type
-
-        self.model = None
-
-    def _resolve_runtime(self):
-        if self.device in (None, "", "auto"):
-            self.device = autodetect_device()
-        elif self.device == "cuda" and not torch.cuda.is_available():
-            logger.warning("CUDA was requested but is not available -> falling back to CPU")
-            self.device = "cpu"
-
-        if self.device == "cuda":
-            if self.compute_type in (None, "", "auto"):
-                self.compute_type = "float16"
-        else:
-            if self.compute_type in (None, "", "auto", "float16"):
-                self.compute_type = "int8"
 
     def load_model(self):
-        if self.model is None:
-            self._resolve_runtime()
-            logger.info(f"Loading Faster-Whisper ({self.model_size}) "
-                        f"on {self.device} (compute_type={self.compute_type})...")
-            try:
-                self.model = WhisperModel(self.model_size,
-                                          device=self.device,
-                                          compute_type=self.compute_type)
-                logger.info(f"Faster-Whisper loaded on {self.device}!")
-                self.status_signal.emit(f"Model loaded ({self.device})")
-            except Exception as e:
-                if self.device == "cpu":
-                    raise
-
-                logger.error(f"Error loading Whisper on {self.device}: {e}. "
-                             f"Falling back to CPU/int8...")
-                self.device = "cpu"
-                self.compute_type = "int8"
-                self.model = WhisperModel(self.model_size, device="cpu", compute_type="int8")
-                logger.info("Faster-Whisper loaded on CPU!")
-                self.status_signal.emit("Model loaded (cpu)")
+        """Wait until the server answers; Whisper itself is loaded there on first use."""
+        caps = sow_server.capabilities(force=True)
+        if not caps or not caps.get("stt", {}).get("available"):
+            raise RuntimeError("speech recognition is not available on the server")
+        self.status_signal.emit(f"Model ready (server, {caps['stt'].get('device', '?')})")
 
     def add_audio(self, audio_bytes):
         self.queue.append(audio_bytes)
@@ -282,14 +250,9 @@ class STTWorker(QThread):
                 audio_bytes = self.queue.pop(0)
 
                 try:
-                    audio_np = np.frombuffer(audio_bytes, np.int16).flatten().astype(np.float32) / 32768.0
-                    segments, info = self.model.transcribe(audio_np, beam_size=5)
-
-                    full_text = ""
-                    for segment in segments:
-                        full_text += segment.text
-
-                    full_text = full_text.strip()
+                    buf = io.BytesIO()
+                    sf.write(buf, np.frombuffer(audio_bytes, np.int16), 16000, format="WAV", subtype="PCM_16")
+                    full_text = sow_server.transcribe(buf.getvalue(), self.model_size).strip()
                     text_lower = full_text.lower()
                     is_hallucination = any(h.lower() in text_lower for h in self.HALLUCINATIONS)
 

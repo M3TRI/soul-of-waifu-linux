@@ -1,0 +1,9 @@
+# NVIDIA GPU through CDI (nvidia-container-toolkit generates /etc/cdi/nvidia.yaml); no
+# runtime change in the Docker daemon config is needed.
+services:
+  llama:
+    devices:
+      - nvidia.com/gpu=all
+  speech:
+    devices:
+      - nvidia.com/gpu=all

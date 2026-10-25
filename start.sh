@@ -8,7 +8,7 @@ if ! command -v ffmpeg >/dev/null 2>&1; then
 fi
 
 if [ ! -x .venv/bin/python ]; then
-    echo "ERROR: .venv not found, run ./install_linux.sh first." >&2
+    echo "ERROR: .venv not found; run the installer (install.sh) first." >&2
     exit 1
 fi
 

@@ -18,6 +18,8 @@ from PyQt6.QtWidgets import (
 )
 
 from app.gui.custom_widgets import sow_toast, SowConfirmDialog
+from app.configuration import configuration
+from app.utils import sow_server
 
 os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "1"
 from huggingface_hub import HfApi, hf_hub_download
@@ -1240,6 +1242,14 @@ class FileSelectorItemWidget(QtWidgets.QFrame):
         self.status_label.setText(self.translations.get("status_download_complete", "Download Complete!"))
         self.status_label.setStyleSheet("color: #4ADE80; font-size: 12px; font-weight: bold;")
 
+        if path.startswith("server:"):
+            # Downloaded on the server: use it from the next message on (llama.cpp's router
+            # loads it on demand and unloads the previous one).
+            model_id = os.path.splitext(path[len("server:"):])[0]
+            configuration.ConfigurationSettings().update_main_setting("local_llm_model", model_id)
+            self.status_label.setText(self.translations.get(
+                "status_download_on_server", "Downloaded to the server and selected: {model}").format(model=model_id))
+
     def on_download_error(self, error_msg):
         DownloadCoordinator.instance().finish(self.filename)
         self.btn_download.setEnabled(True)
@@ -1283,7 +1293,64 @@ class FileDownloader(QThread):
     def cancel(self):
         self._is_cancelled = True
 
+    def _emit_progress(self, downloaded, total_size, elapsed_time):
+        percent = int((downloaded / total_size) * 100)
+        speed_bps = downloaded / elapsed_time if elapsed_time > 0 else 0
+        remaining_bytes = total_size - downloaded
+        eta_seconds = remaining_bytes / speed_bps if speed_bps > 0 else 0
+
+        down_str = self.format_size(downloaded)
+        total_str = self.format_size(total_size)
+        speed_str = f"{self.format_size(speed_bps)}/s"
+
+        tr_h = self.translations.get("time_h", "h")
+        tr_m = self.translations.get("time_m", "m")
+        tr_s = self.translations.get("time_s", "s")
+        tr_left = self.translations.get("time_left", "left")
+
+        if eta_seconds > 3600:
+            eta_str = f"{int(eta_seconds // 3600)}{tr_h} {int((eta_seconds % 3600) // 60)}{tr_m} {tr_left}"
+        elif eta_seconds > 60:
+            eta_str = f"{int(eta_seconds // 60)}{tr_m} {int(eta_seconds % 60)}{tr_s} {tr_left}"
+        else:
+            eta_str = f"{int(eta_seconds)}{tr_s} {tr_left}"
+
+        text_status = f"{down_str} / {total_str}  •  {speed_str}  •  {eta_str}"
+        self.progress.emit(percent, text_status)
+
+    def _run_on_server(self):
+        """
+        The language model runs on the Soul of Waifu server, so the GGUF goes there: the
+        server downloads it and this thread reports the job's progress through the same
+        signals. finished() gets "server:<file name>".
+        """
+        url = f"https://huggingface.co/{self.model_id}/resolve/main/{self.filename}"
+        try:
+            job_id = sow_server.start_model_download(url)
+            start_time = time.time()
+            while True:
+                if self._is_cancelled:
+                    sow_server.cancel_job(job_id)
+                    self.cancelled.emit()
+                    return
+                state = sow_server.job(job_id)
+                if state["status"] == "done":
+                    self.finished.emit(f"server:{state['file']}")
+                    return
+                if state["status"] in ("failed", "cancelled"):
+                    self.error.emit(state.get("error") or state["status"])
+                    return
+                if state.get("total"):
+                    self._emit_progress(state["done"], state["total"], time.time() - start_time)
+                self.msleep(500)
+        except Exception as e:
+            if not self._is_cancelled:
+                self.error.emit(self.translations.get("network_error", "Network error: ") + str(e))
+
     def run(self):
+        if sow_server.server_mode():
+            self._run_on_server()
+            return
         try:
             os.makedirs(self.save_dir, exist_ok=True)
             local_path = os.path.join(self.save_dir, self.filename)
@@ -1310,30 +1377,7 @@ class FileDownloader(QThread):
                             current_time = time.time()
                             if current_time - last_update_time > 0.1:
                                 if total_size:
-                                    percent = int((downloaded / total_size) * 100)
-                                    elapsed_time = current_time - start_time
-                                    speed_bps = downloaded / elapsed_time if elapsed_time > 0 else 0
-                                    remaining_bytes = total_size - downloaded
-                                    eta_seconds = remaining_bytes / speed_bps if speed_bps > 0 else 0
-                                    
-                                    down_str = self.format_size(downloaded)
-                                    total_str = self.format_size(total_size)
-                                    speed_str = f"{self.format_size(speed_bps)}/s"
-                                    
-                                    tr_h = self.translations.get("time_h", "h")
-                                    tr_m = self.translations.get("time_m", "m")
-                                    tr_s = self.translations.get("time_s", "s")
-                                    tr_left = self.translations.get("time_left", "left")
-
-                                    if eta_seconds > 3600:
-                                        eta_str = f"{int(eta_seconds // 3600)}{tr_h} {int((eta_seconds % 3600) // 60)}{tr_m} {tr_left}"
-                                    elif eta_seconds > 60:
-                                        eta_str = f"{int(eta_seconds // 60)}{tr_m} {int(eta_seconds % 60)}{tr_s} {tr_left}"
-                                    else:
-                                        eta_str = f"{int(eta_seconds)}{tr_s} {tr_left}"
-
-                                    text_status = f"{down_str} / {total_str}  •  {speed_str}  •  {eta_str}"
-                                    self.progress.emit(percent, text_status)
+                                    self._emit_progress(downloaded, total_size, current_time - start_time)
                                 
                                 last_update_time = current_time
             

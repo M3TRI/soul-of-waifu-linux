@@ -20,6 +20,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from app.configuration.configuration import ConfigurationAPI, ConfigurationCharacters
+from app.utils.user_data import CONFIG_DIR
 
 logger = logging.getLogger(__name__)
 
@@ -40,8 +41,8 @@ EMPTY_MESSAGE_HINT = (
 )
 UNREADABLE_ATTACHMENT_TEXT = "*I can't read that file type — send text or an image instead.*"
 
-BINDINGS_PATH = Path("app/configuration/discord_bindings.json")
-KNOWN_USERS_PATH = Path("app/configuration/discord_users.json")
+BINDINGS_PATH = Path(CONFIG_DIR) / "discord_bindings.json"
+KNOWN_USERS_PATH = Path(CONFIG_DIR) / "discord_users.json"
 
 IMAGE_EXTENSIONS = ('.png', '.jpg', '.jpeg', '.webp', '.bmp', '.gif')
 
