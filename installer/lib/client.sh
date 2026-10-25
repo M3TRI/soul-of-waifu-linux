@@ -44,12 +44,9 @@ client_python() {
                  "Python 3.11 и пакеты программы ставятся в $APP_DIR/.venv (около 1,5 ГБ).")"
     ensure_uv
     local py=$APP_DIR/.venv/bin/python
-    # uv-managed Python only: distro Pythons may lack the headers live2d-py builds against.
+    # uv-managed Python only: distro Pythons may lack the headers PyAudio builds against.
     [ -x "$py" ] || run uv venv --python-preference only-managed --python 3.11 "$APP_DIR/.venv"
     run uv pip install --python "$py" -r "$APP_DIR/installer/client-requirements.txt"
-    # live2d-py 0.5.4 is an sdist on Linux and needs CMake 3.26-3.x.
-    run uv pip install --python "$py" "cmake>=3.26,<4"
-    PATH="$APP_DIR/.venv/bin:$PATH" run uv pip install --python "$py" live2d-py==0.5.4
     "$py" -c "import PyQt6.QtWebEngineWidgets, live2d.v3, onnxruntime" \
         || die "$(t "The app environment is incomplete." "Окружение программы собралось не полностью.")"
     ok "$(t "App environment ready." "Окружение программы готово.")"

@@ -1,6 +1,9 @@
 # Python packages of the UI client: install_linux.sh's list without the ML stack (torch,
 # transformers, TTS engines, Whisper, RVC), which now runs in the server containers.
-# Same pins as install_linux.sh. live2d-py is installed separately (built with CMake < 4).
+# Same pins as install_linux.sh.
+# live2d-py 0.8.x ships manylinux wheels (0.5.4 had to be compiled with CMake); 1.0 drops the
+# live2d.v3 API the Live2D widget uses.
+live2d-py==0.8.1
 numpy==1.26.4
 PyQt6==6.9.0
 PyQt6-WebEngine==6.9.0
