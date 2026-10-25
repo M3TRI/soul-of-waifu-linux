@@ -8,6 +8,7 @@ APP_DIR=$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)
 . "$APP_DIR/installer/lib/survey.sh"
 . "$APP_DIR/installer/lib/system.sh"
 . "$APP_DIR/installer/lib/server.sh"
+log_start uninstall "$@"
 
 DATA_DIR=$SOW_HOME/data
 size_of() { du -sh "$1" 2>/dev/null | cut -f1; }

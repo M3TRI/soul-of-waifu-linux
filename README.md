@@ -94,7 +94,10 @@ Files: app `~/.local/share/soul-of-waifu/app`, server data and models
 | No sound / wrong microphone | In *Audio Devices* pick the `default`, `pipewire` or `pulse` devices |
 | Live2D/VRM or web views are black on Wayland | `QT_QPA_PLATFORM=xcb soul-of-waifu` |
 
-App logs: `~/.local/share/soul-of-waifu/data/logs`; server logs: `sow-server logs`.
+App logs: `~/.local/share/soul-of-waifu/data/logs`; server logs: `sow-server logs`. Every install,
+update (including the one from the app) and removal writes a log with all its output, the commands
+it ran and your answers to `~/.local/state/soul-of-waifu/logs` (the pairing token is masked); attach
+it when you report a problem.
 
 ## Changes compared to upstream
 

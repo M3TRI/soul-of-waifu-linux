@@ -17,12 +17,24 @@ fi
 
 APP_DIR=${XDG_DATA_HOME:-$HOME/.local/share}/soul-of-waifu/app
 
+# The log of this run starts here and installer/lib/log.sh continues it: everything printed
+# (colours stripped, the pairing token masked) plus "##" records of the answers.
+SOW_LOG=${XDG_STATE_HOME:-$HOME/.local/state}/soul-of-waifu/logs/install-$(date +%Y%m%d-%H%M%S).log
+mkdir -p "$(dirname "$SOW_LOG")"
+[ -t 1 ] && export SOW_TTY=1
+exec > >(tee >(sed -u -E 's/\x1b\[[0-9;?]*[A-Za-z]//g; s/.*\r//; s/(token=)[^&[:space:]]+/\1***/g' >>"$SOW_LOG")) 2>&1
+SOW_LOG_FD1=$(readlink /proc/$$/fd/1 2>/dev/null || true)
+export SOW_LOG SOW_LOG_FD1
+note() { printf '%s ## %s\n' "$(date '+%F %T')" "$*" >>"$SOW_LOG"; }
+note "Soul of Waifu install.sh (branch $BRANCH), app folder $APP_DIR"
+
 # Ask the language once here; installer/main.sh reads it from SOW_LANG.
 case "${LC_ALL:-${LANG:-}}" in ru*) default=2 ;; *) default=1 ;; esac
 printf 'Language / Язык:\n   1) English\n   2) Русский\n   [%s]: ' "$default"
 read -r answer </dev/tty || answer=""
 case "${answer:-$default}" in 2) SOW_LANG=ru ;; *) SOW_LANG=en ;; esac
 export SOW_LANG
+note "language: '$answer' -> $SOW_LANG"
 msg() { if [ "$SOW_LANG" = ru ]; then echo "$2"; else echo "$1"; fi; }
 
 if [ -d "$APP_DIR/.git" ]; then

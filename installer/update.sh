@@ -14,6 +14,7 @@ cd "$APP_DIR"
 . installer/lib/survey.sh
 . installer/lib/system.sh
 . installer/lib/server.sh
+log_start update "$@"
 
 [ -d .git ] || die "$(t "This copy was not installed with git; run the installer again to update." \
                         "Эта копия установлена не через git; для обновления запустите установщик заново.")"

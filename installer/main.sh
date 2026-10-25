@@ -13,6 +13,7 @@ APP_DIR=$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)
 . "$APP_DIR/installer/lib/client.sh"
 CATALOG_FILE=$APP_DIR/server/catalog.tsv
 
+log_start install "$@"
 choose_language
 
 [ "$(id -u)" != 0 ] || die "$(t "Run the installer as your normal user, not root; it asks for sudo when it needs it." \
@@ -26,6 +27,8 @@ explain "$(t "This installer checks your computer, explains each step and asks b
 
 info "$(t "Collecting information about the system..." "Сбор сведений о системе...")"
 survey_all
+log_vars OS_NAME OS_ID OS_FAMILY ARCH CPU_MODEL CPU_THREADS RAM_MB DISK_FREE_MB GPU_LIST NV_DRIVER_VERSION \
+         SECURE_BOOT NET_OK DOCKER_VERSION DOCKER_ACCESS DOCKER_ROOT DOCKER_FREE_MB NVIDIA_CTK_VERSION NVIDIA_CDI_SPEC
 print_summary
 
 case "$OS_FAMILY" in
