@@ -7,7 +7,7 @@ SOW_CONF_DIR=${XDG_CONFIG_HOME:-$HOME/.config}/soul-of-waifu
 SERVER_ENV=$SOW_CONF_DIR/server.env
 SERVER_DATA=$SOW_HOME/server
 SOW_PORT_DEFAULT=8765
-SOW_REGISTRY=registry.gitlab.projectmiku.cc/opensrc/soul-of-waifu-linux
+SOW_REGISTRY=ghcr.io/m3tri/soul-of-waifu-linux
 
 # compose_cmd ARGS...: docker compose with this install's project, env file and GPU overlay.
 compose_cmd() {

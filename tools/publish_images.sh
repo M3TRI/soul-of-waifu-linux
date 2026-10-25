@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 # Builds the server images of the current commit and pushes them to the project registry,
 # tagged with the git tree hash of server/ (what installer/lib/server.sh pulls). Needs a
-# `docker login registry.gitlab.projectmiku.cc` with push rights and a clean server/ folder.
+# `docker login ghcr.io` with push rights and a clean server/ folder.
+# Normally the GitHub Actions workflow (.github/workflows/server-images.yml) does this on the
+# GitHub mirror; this script is the manual fallback.
 #   tools/publish_images.sh [cu128 cu126 cpu]
 set -euo pipefail
 cd "$(dirname "$(readlink -f "$0")")/.."
-REPO=registry.gitlab.projectmiku.cc/opensrc/soul-of-waifu-linux
+REPO=ghcr.io/m3tri/soul-of-waifu-linux
 [ -z "$(git status --porcelain -- server)" ] || { echo "server/ has uncommitted changes" >&2; exit 1; }
 TAG=$(git rev-parse --short=12 HEAD:server)
 FLAVOURS=("${@:-cu128 cu126 cpu}")
