@@ -29,7 +29,8 @@ class LocalProvider(BaseAIProvider):
             api_key=self.api_key,
             http_client=httpx.AsyncClient(
                 timeout=httpx.Timeout(connect=10.0, read=120.0, write=30.0, pool=10.0),
-                limits=httpx.Limits(max_connections=5, max_keepalive_connections=2)
+                limits=httpx.Limits(max_connections=5, max_keepalive_connections=2),
+                verify=self.endpoint.verify()
             )
         )
 

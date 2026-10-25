@@ -46,13 +46,18 @@ class LocalEndpointConfig:
             self.api_key = "no-key-required"
             self.configured_model = ""
 
+    def verify(self):
+        """TLS verification for this endpoint (the paired server's certificate is pinned)."""
+        from app.utils import sow_server
+        return sow_server.verify_for(self.base_url)
+
     def auth_headers(self) -> dict:
         if self.api_key and self.api_key != "no-key-required":
             return {"Authorization": f"Bearer {self.api_key}"}
         return {}
 
     async def fetch_models_async(self, timeout: float = 5.0) -> list:
-        async with httpx.AsyncClient(timeout=timeout) as client:
+        async with httpx.AsyncClient(timeout=timeout, verify=self.verify()) as client:
             response = await client.get(f"{self.base_url}/models", headers=self.auth_headers())
             response.raise_for_status()
             data = response.json()

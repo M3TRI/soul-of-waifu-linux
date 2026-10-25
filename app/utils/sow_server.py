@@ -119,6 +119,20 @@ def connection() -> _Connection:
         return _conn
 
 
+def verify_for(url: str):
+    """
+    httpx `verify` value for a URL: the pinned context when the URL is on the paired
+    server (its certificate is self-signed), the default CA check for anything else. Lets
+    code that builds its own HTTP clients, like the Local LLM provider, reach the gateway.
+    """
+    conn = connection()
+    if url.startswith(conn.base_url) and conn.base_url.startswith("https://") and conn.fingerprint:
+        if conn._ssl is None:
+            conn._ssl = _pinned_context(conn.base_url, conn.fingerprint)
+        return conn._ssl
+    return True
+
+
 def reset():
     """Forget cached settings and capabilities (after the connection settings change)."""
     global _conn
