@@ -176,8 +176,20 @@ download_model() {
 
 # Server images: pull the prebuilt ones, build locally when that fails (offline registry,
 # an unpublished version, a modified server/ folder).
+# Images of this server version already on this computer (built here before, or loaded).
+images_present() {
+    local image
+    for image in $(compose_cmd config --images gateway speech 2>/dev/null); do
+        dk image inspect "$image" >/dev/null 2>&1 || return 1
+    done
+    [ -n "${image:-}" ]
+}
+
 get_images() {
     compose_cmd pull llama
+    if [ -z "$(git -C "$APP_DIR" status --porcelain -- server 2>/dev/null)" ] && images_present; then
+        return 0
+    fi
     if [ -n "$(git -C "$APP_DIR" status --porcelain -- server 2>/dev/null)" ] || ! compose_cmd pull gateway speech; then
         info "$(t "No prebuilt images for this version: building them here (15-30 minutes)." \
                   "Готовых образов для этой версии нет: они собираются здесь (15-30 минут).")"
