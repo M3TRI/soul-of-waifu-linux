@@ -2187,11 +2187,14 @@ tts_selector_xttsv2_male: Male
 tts_voicing_mode_label: Voicing Mode
 typingIndicator_text: Thinking
 unknown: Unknown
-update_available_body: 'A new version is available: '
-update_available_close: Close
-update_available_info: Would you like to update the program?
-update_available_link: Go to GitHub
+update_available_body: Update available
+update_available_close: Later
+update_available_info: 'New changes: {n}'
+update_available_link: Update now
 update_available_title: Update Available
+update_running: Updating... The app restarts by itself when it is done.
+update_done: Updated. Restarting...
+update_failed: The update failed; details below. Your data is not affected.
 update_btn: Update
 update_current_version: 'Current version: v2.5.1'
 update_engine_tooltip: Download and install the latest llama.cpp binaries for the selected backend.

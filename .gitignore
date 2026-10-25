@@ -2,17 +2,15 @@ __pycache__/
 *.pyc
 *.part
 .venv/
-.soul/
-.soul_stage/
-Backups/
-logs/*
-!logs/.gitkeep
-app/cache/*
-!app/cache/.gitkeep
-assets/local_llm/*
-!assets/local_llm/.gitkeep
-assets/rvc_models/*
-!assets/rvc_models/.gitkeep
+# Links into the user data folder (app/utils/user_data.py)
+/.soul
+/.soul_stage
+/Backups
+/logs
+/app/cache
+/app/data
+/assets/local_llm
+/assets/rvc_models
 app/utils/e5-small-en-ru/model.safetensors
 app/utils/emotions/detector/pytorch_model.bin
 app/utils/ai_clients/backend/_temp/recommended_models_cache.json*

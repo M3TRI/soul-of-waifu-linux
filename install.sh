@@ -27,6 +27,20 @@ msg() { if [ "$SOW_LANG" = ru ]; then echo "$2"; else echo "$1"; fi; }
 
 if [ -d "$APP_DIR/.git" ]; then
     msg "Updating $APP_DIR" "Обновление $APP_DIR"
+    # Copies installed before the user data folder kept settings and characters inside the
+    # program folder: move them to ~/.local/share/soul-of-waifu/data first (as the app's
+    # user_data.py would), so that git can update the folder.
+    conf=$(dirname "$APP_DIR")/data/configuration
+    if [ ! -d "$conf" ] && ! git -C "$APP_DIR" diff --quiet -- app/configuration 2>/dev/null; then
+        mkdir -p "$conf/characters"
+        for f in settings.json api.json characters.json discord_bindings.json discord_users.json; do
+            [ -f "$APP_DIR/app/configuration/$f" ] && cp -a "$APP_DIR/app/configuration/$f" "$conf/"
+        done
+        cp -a "$APP_DIR"/app/configuration/characters/*.json "$conf/characters/" 2>/dev/null || true
+        git -C "$APP_DIR" checkout -- app/configuration
+        git -C "$APP_DIR" clean -fq -- app/configuration/characters
+        msg "Your settings and characters were moved to $conf" "Ваши настройки и персонажи перенесены в $conf"
+    fi
     git -C "$APP_DIR" pull --ff-only
 elif [ -f "$APP_DIR/installer/main.sh" ]; then
     :

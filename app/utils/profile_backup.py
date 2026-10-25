@@ -10,6 +10,8 @@ from typing import Optional, Callable
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
+from app.utils import user_data
+
 logger = logging.getLogger("ProfileBackup")
 
 SCHEMA_VERSION = 1
@@ -136,7 +138,7 @@ def iter_group_files(group: BackupGroup, root: str):
     root_abs = os.path.abspath(root)
     seen = set()
     for rel in group.paths:
-        abs_path = os.path.join(root_abs, *rel.replace("\\", "/").split("/"))
+        abs_path = user_data.resolve(root_abs, rel)
         if not os.path.exists(abs_path):
             continue
         if os.path.isfile(abs_path):
@@ -154,7 +156,9 @@ def iter_group_files(group: BackupGroup, root: str):
                     if fpath in seen:
                         continue
                     seen.add(fpath)
-                    arc = os.path.relpath(fpath, root_abs).replace("\\", "/")
+                    # Archive names stay program-relative even for files in the data folder.
+                    arc = "/".join([rel.replace("\\", "/").rstrip("/"),
+                                    os.path.relpath(fpath, abs_path).replace("\\", "/")])
                     yield fpath, arc
 
 
@@ -387,7 +391,7 @@ def rollback_from_snapshot(root: str, snapshot_path: str) -> bool:
             for name in zf.namelist():
                 if name.endswith("/") or name.startswith("_"):
                     continue
-                target = os.path.join(root, *name.split("/"))
+                target = user_data.resolve(root, name)
                 os.makedirs(os.path.dirname(target) or ".", exist_ok=True)
                 with zf.open(name) as src, open(target, "wb") as dst:
                     shutil.copyfileobj(src, dst)
@@ -442,9 +446,9 @@ class RestoreWorker(QThread):
         total = len(plan)
         for i, src in enumerate(plan):
             rel = os.path.relpath(src, files_root)
-            target = os.path.join(self.root, *Path(rel).parts)
+            target = user_data.resolve(self.root, Path(rel).as_posix())
             os.makedirs(os.path.dirname(target) or ".", exist_ok=True)
-            os.replace(src, target)
+            shutil.move(src, target)   # the data folder may be on another filesystem
             applied += 1
             if i % 25 == 0 or i == total - 1:
                 self.progress.emit(60 + int(i / max(1, total) * 38),

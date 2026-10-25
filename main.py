@@ -14,10 +14,15 @@ from PyQt6.QtGui import QFontDatabase
 from PyQt6 import QtCore, QtGui, QtWidgets
 from PyQt6.QtWidgets import QApplication, QMainWindow, QMessageBox
 
+# User data lives outside the program folder; move it there and link it before any module
+# reads settings or opens the log folder.
+from app.utils import user_data
+user_data.setup()
+
 from app.configuration import configuration
 from app.gui.icons import resources
 from app.gui import interface_signals
-from app.utils import sow_server
+from app.utils import sow_server, updater
 from app.utils.ai_clients.local_server_manager import LocalServerManager
 from app.utils.discord_rpc import DiscordRPCManager
 from app.gui.sowInterface import Ui_MainWindow
@@ -613,32 +618,15 @@ class MainWindow(QMainWindow):
         available_memory_round = memory_info.total // (1024 ** 3)
         self.configuration.update_main_setting("available_memory", available_memory_round)
         
-    def check_for_updates(self, current_version):
-        try:
-            repo_url = "https://api.github.com/repos/jofizcd/Soul-of-Waifu/releases/latest"
-            response = requests.get(repo_url, timeout=10)
-            response.raise_for_status()
-            latest_release = response.json()
-            latest_version = latest_release["tag_name"]
-
-            if latest_version != current_version:
-                logger.info(f"A new version has been released, update the program! {latest_version}")
-                return latest_version, latest_release["html_url"]
-            else:
-                return None, None
-        except requests.exceptions.RequestException as e:
-            logger.warning(f"Couldn't check for updates: {e}")
-            return None, None
-
-        except Exception as e:
-            logger.error(f"Error checking for updates: {e}", exc_info=True)
-            return None, None
-
-    def show_update_dialog(self, latest_version, github_url):
+    def show_update_dialog(self, info):
+        """
+        New commits on the installed branch (app/utils/updater.py): list them and, on
+        "Update", run installer/update.sh here and restart the app when it is done.
+        """
         dialog = QtWidgets.QDialog(self)
         dialog.setWindowTitle(self.translations.get("update_available_title", "Update Available"))
         dialog.setWindowIcon(QtGui.QIcon("app/gui/icons/logotype.ico"))
-        dialog.setFixedSize(400, 450)
+        dialog.setFixedSize(460, 600)
 
         dialog.setStyleSheet("""
             QDialog {
@@ -655,6 +643,14 @@ class MainWindow(QMainWindow):
                 font-size: 14px;
                 color: #9CA3AF;
                 line-height: 1.5;
+            }
+            QPlainTextEdit {
+                background-color: #151518;
+                color: #C9CDD3;
+                border: 1px solid #2A2A30;
+                border-radius: 10px;
+                padding: 6px;
+                font-size: 12px;
             }
             QLabel#version_label {
                 font-size: 12px;
@@ -714,7 +710,7 @@ class MainWindow(QMainWindow):
         title_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
 
         version_box = QtWidgets.QHBoxLayout()
-        v_text = f"{current_version}  →  {latest_version}"
+        v_text = f"{info['current'][:7]}  →  {info['latest'][:7]}"
         version_label = QtWidgets.QLabel(v_text)
         version_label.setObjectName("version_label")
         version_box.addStretch()
@@ -722,8 +718,7 @@ class MainWindow(QMainWindow):
         version_box.addStretch()
 
         info_label = QtWidgets.QLabel(
-            self.translations.get("update_available_info", 
-            "A newer version of Soul of Waifu is ready. Update now to get the latest features and fixes.")
+            self.translations.get("update_available_info", "Changes: {n}").format(n=len(info["changes"]))
         )
         info_label.setObjectName("infoLabel")
         info_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
@@ -738,7 +733,8 @@ class MainWindow(QMainWindow):
         )
         github_button.setObjectName("github_button")
         github_button.setCursor(QtGui.QCursor(QtCore.Qt.CursorShape.PointingHandCursor))
-        github_button.clicked.connect(lambda: QtGui.QDesktopServices.openUrl(QtCore.QUrl(github_url)))
+        changes_box = QtWidgets.QPlainTextEdit("\n".join(f"• {c}" for c in info["changes"]))
+        changes_box.setReadOnly(True)
 
         close_button = QtWidgets.QPushButton(
             self.translations.get("update_available_close", "Later")
@@ -755,10 +751,47 @@ class MainWindow(QMainWindow):
         main_layout.addLayout(version_box)
         main_layout.addSpacing(5)
         main_layout.addWidget(info_label)
-        main_layout.addStretch()
+        main_layout.addWidget(changes_box, 1)
         main_layout.addLayout(button_layout)
 
-        dialog.exec()
+        def run_update():
+            github_button.setEnabled(False)
+            close_button.setEnabled(False)
+            info_label.setText(self.translations.get(
+                "update_running", "Updating... The app restarts by itself when it is done."))
+            changes_box.clear()
+            proc = QtCore.QProcess(dialog)
+            env = QtCore.QProcessEnvironment.systemEnvironment()
+            env.insert("SOW_LANG", "ru" if str(self.configuration.get_main_setting("program_language")) == "1" else "en")
+            env.insert("NO_COLOR", "1")
+            proc.setProcessEnvironment(env)
+            proc.setProcessChannelMode(QtCore.QProcess.ProcessChannelMode.MergedChannels)
+            proc.setWorkingDirectory(updater.APP_DIR)
+
+            def on_output():
+                text = bytes(proc.readAllStandardOutput()).decode("utf-8", "replace")
+                changes_box.appendPlainText(text.rstrip("\n"))
+
+            def on_finished(code, _status):
+                if code == 0:
+                    info_label.setText(self.translations.get("update_done", "Updated. Restarting..."))
+                    QtCore.QTimer.singleShot(1500, restart)
+                else:
+                    info_label.setText(self.translations.get(
+                        "update_failed", "The update failed; details below. Your data is not affected."))
+                    close_button.setEnabled(True)
+
+            proc.readyReadStandardOutput.connect(on_output)
+            proc.finished.connect(on_finished)
+            proc.start("bash", [updater.UPDATE_SCRIPT])
+
+        def restart():
+            QtCore.QProcess.startDetached("bash", [os.path.join(updater.APP_DIR, "start.sh")], updater.APP_DIR)
+            QtWidgets.QApplication.quit()
+
+        github_button.clicked.connect(run_update)
+        self._update_dialog = dialog
+        dialog.show()
 
     def load_fonts_from_folder(self, folder_path):
         for font_file in os.listdir(folder_path):
@@ -943,14 +976,13 @@ if __name__ == "__main__":
 
     main_window.show()    
 
-    current_version = "v2.5.1"
+    async def deferred_update_check():
+        # git fetch in a thread: start-up does not wait for the network.
+        info = await asyncio.to_thread(updater.check)
+        if info:
+            main_window.show_update_dialog(info)
 
-    def deferred_update_check():
-        latest_version, github_url = main_window.check_for_updates(current_version)
-        if latest_version:
-            main_window.show_update_dialog(latest_version, github_url)
-
-    QtCore.QTimer.singleShot(0, deferred_update_check)
+    asyncio.ensure_future(deferred_update_check())
     
     asyncio.ensure_future(main_window.startup_sequence())
 

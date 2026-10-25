@@ -2193,11 +2193,14 @@ tts_selector_xttsv2_male: Male
 tts_voicing_mode_label: Режим озвучки
 typingIndicator_text: Размышляет
 unknown: Неизвестно
-update_available_body: 'Доступна новая версия: '
-update_available_close: Закрыть
-update_available_info: Вы хотите обновить программу?
-update_available_link: Перейти на GitHub
-update_available_title: Обновление Доступно
+update_available_body: Доступно обновление
+update_available_close: Позже
+update_available_info: 'Новых изменений: {n}'
+update_available_link: Обновить
+update_available_title: Обновление доступно
+update_running: Обновление... По завершении программа перезапустится сама.
+update_done: Обновлено. Перезапуск...
+update_failed: Обновление не удалось, подробности ниже. Ваши данные не затронуты.
 update_btn: Обновления
 update_current_version: 'Текущая версия: v2.5.1'
 update_engine_tooltip: Скачайте и установите последние версии llama.cpp для выбранного бэкенда.
