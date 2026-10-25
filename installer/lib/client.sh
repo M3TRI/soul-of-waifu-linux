@@ -113,11 +113,13 @@ Terminal=false
 Categories=Game;Chat;
 EOF
     command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database "$HOME/.local/share/applications" 2>/dev/null || true
-    case ":$PATH:" in
-        *":$HOME/.local/bin:"*) ;;
-        *) warn "$(t "~/.local/bin is not in PATH: open a new terminal or add it to use the 'soul-of-waifu' command." \
-                     "~/.local/bin нет в PATH: откройте новый терминал или добавьте его, чтобы работала команда 'soul-of-waifu'.")" ;;
-    esac
+    # KDE Plasma shows a new entry only after its menu cache is rebuilt.
+    local k
+    for k in kbuildsycoca6 kbuildsycoca5; do
+        if command -v "$k" >/dev/null 2>&1; then "$k" >/dev/null 2>&1 || true; break; fi
+    done
+    log_event "launcher: $HOME/.local/bin/soul-of-waifu, $HOME/.local/share/applications/soul-of-waifu.desktop"
     ok "$(t "Menu entry 'Soul of Waifu' and command 'soul-of-waifu' added." \
             "Добавлены пункт меню 'Soul of Waifu' и команда 'soul-of-waifu'.")"
+    ensure_local_bin_on_path
 }

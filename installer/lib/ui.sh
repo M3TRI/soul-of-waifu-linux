@@ -139,6 +139,49 @@ run() {
     return $rc
 }
 
+# The user's PATH as it was when the installer started: ensure_uv prepends ~/.local/bin to
+# the installer's own PATH, which says nothing about the user's shell.
+SOW_USER_PATH=${SOW_USER_PATH:-$PATH}
+export SOW_USER_PATH
+
+# ensure_local_bin_on_path: the soul-of-waifu and sow-server commands live in ~/.local/bin,
+# which not every shell config puts on PATH (zsh on CachyOS, fish). Offers to add it to the
+# config of the user's shell; asks once per run.
+ensure_local_bin_on_path() {
+    case ":$SOW_USER_PATH:" in *":$HOME/.local/bin:"*|*":$HOME/.local/bin/:"*) return 0 ;; esac
+    [ -z "${SOW_PATH_ASKED:-}" ] || return 0
+    SOW_PATH_ASKED=1
+    local shell rc line
+    shell=$(basename "${SHELL:-bash}")
+    case "$shell" in
+        zsh)  rc=${ZDOTDIR:-$HOME}/.zshrc; line='export PATH="$HOME/.local/bin:$PATH"' ;;
+        bash) rc=$HOME/.bashrc; line='export PATH="$HOME/.local/bin:$PATH"' ;;
+        fish) rc=${XDG_CONFIG_HOME:-$HOME/.config}/fish/conf.d/soul-of-waifu.fish; line='fish_add_path -g ~/.local/bin' ;;
+        *)
+            warn "$(t "~/.local/bin is not in PATH of your shell ($shell): add it there to use the commands by name." \
+                      "~/.local/bin нет в PATH вашей оболочки ($shell): добавьте его, чтобы команды работали по имени.")"
+            return 0 ;;
+    esac
+    if [ -f "$rc" ] && grep -qF '.local/bin' "$rc"; then
+        info "$(t "$rc already adds ~/.local/bin to PATH: the commands work in a new terminal." \
+                  "$rc уже добавляет ~/.local/bin в PATH: команды заработают в новом терминале.")"
+        return 0
+    fi
+    header "$(t "Commands in the terminal" "Команды в терминале")"
+    explain "$(t "The commands are in ~/.local/bin, which your shell ($shell) does not search." \
+                 "Команды лежат в ~/.local/bin, где ваша оболочка ($shell) их не ищет.")" \
+            "$(t "One line added to $rc fixes it:" "Это исправит одна строка в $rc:")" "  $line"
+    if ask_yn "$(t "Add it?" "Добавить её?")" y; then
+        mkdir -p "$(dirname "$rc")"
+        printf '\n# Added by the Soul of Waifu installer: its commands are in ~/.local/bin\n%s\n' "$line" >>"$rc"
+        log_event "PATH line added to $rc"
+        ok "$(t "Added. The commands work in a new terminal." "Добавлено. Команды заработают в новом терминале.")"
+    else
+        warn "$(t "Then start the app from the menu or as ~/.local/bin/soul-of-waifu." \
+                  "Тогда запускайте программу из меню или как ~/.local/bin/soul-of-waifu.")"
+    fi
+}
+
 mb_to_gb() { awk -v m="$1" 'BEGIN { printf "%.1f", m / 1024 }'; }
 # gb MB -> "12.3 GB" in the user's language.
 gb() { printf '%s %s' "$(mb_to_gb "$1")" "$(t GB ГБ)"; }

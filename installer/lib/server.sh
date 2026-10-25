@@ -223,6 +223,7 @@ install_server_cli() {
 exec bash "$APP_DIR/installer/sow-server.sh" "\$@"
 EOF
     chmod +x "$HOME/.local/bin/sow-server"
+    ensure_local_bin_on_path
 }
 
 # Daily automatic update of a server-only install (opt-in): a systemd user timer running
