@@ -45,11 +45,26 @@ log_start() {
         log_event "system: $(. /etc/os-release 2>/dev/null; echo "${PRETTY_NAME:-unknown}") kernel $(uname -r) $(uname -m)"
         log_event "locale: LANG=${LANG:-} SOW_LANG=${SOW_LANG:-} terminal=${SOW_TTY:-no} session=${XDG_SESSION_TYPE:-} desktop=${XDG_CURRENT_DESKTOP:-}"
     fi
+    # The failing command and its place: set -e otherwise ends the script without a word when
+    # the command itself printed nothing (a sed on a missing file did exactly that).
+    set -o errtrace
+    trap '_log_error $? "$BASH_COMMAND" "${BASH_SOURCE[0]:-$0}" "$LINENO"' ERR
     trap '_log_finish $?' EXIT
+}
+
+_log_error() {
+    # Inside $(...) a failure may be expected and handled by the caller; the caller's own
+    # line is reported if it is not.
+    [ "$BASH_SUBSHELL" = 0 ] || return 0
+    SOW_LOG_FAILED="$2 ($(basename "$3"):$4, exit $1)"
+    log_event "error: exit $1 at $3:$4: $2"
 }
 
 _log_finish() {
     local code=$1
+    if [ "$code" != 0 ] && [ -n "${SOW_LOG_FAILED:-}" ]; then
+        printf '%s  %s %s\n' "${C_RED:-}✗${C_RESET:-}" "$(t "Stopped at:" "Прервалось на:")" "$SOW_LOG_FAILED" >&2
+    fi
     log_event "finished with exit code $code"
     printf '\n%s  %s %s\n' "${C_DIM:-}•" "$(t "Log:" "Лог:")" "$SOW_LOG${C_RESET:-}"
     # Let tee and sed write the last lines before the terminal gets its prompt back.

@@ -12,7 +12,7 @@ SOW_REGISTRY=ghcr.io/m3tri/soul-of-waifu-linux
 # compose_cmd ARGS...: docker compose with this install's project, env file and GPU overlay.
 compose_cmd() {
     local files=(-f "$APP_DIR/server/compose.yaml") overlay
-    overlay=$(sed -n 's/^SOW_GPU_OVERLAY=//p' "$SERVER_ENV" 2>/dev/null)
+    overlay=$(env_get SOW_GPU_OVERLAY)
     [ -n "$overlay" ] && files+=(-f "$APP_DIR/server/$overlay")
     SOW_COMMIT=$(git -C "$APP_DIR" rev-parse HEAD 2>/dev/null || echo dev)
     # Same server code, same image: the tag is the git tree hash of server/.
@@ -23,7 +23,9 @@ compose_cmd() {
         --env-file "$SERVER_ENV" "${files[@]}" "$@"
 }
 
-env_get() { sed -n "s/^$1=//p" "$SERVER_ENV" 2>/dev/null | tail -n 1; }
+# env_get NAME: a value from server.env, empty when it or the file is missing (on a first
+# install there is none yet: sed's exit code 2 would end the installer through pipefail).
+env_get() { [ -f "$SERVER_ENV" ] || return 0; sed -n "s/^$1=//p" "$SERVER_ENV" | tail -n 1; }
 
 # Address of this computer in the local network: a private IPv4 on a physical interface.
 # The default route is no guide (with a full-tunnel VPN it points into the tunnel), and
