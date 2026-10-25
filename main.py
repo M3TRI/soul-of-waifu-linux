@@ -1,7 +1,6 @@
 import os
 import sys
 import yaml
-import torch
 import ctypes
 import psutil
 import GPUtil
@@ -18,6 +17,7 @@ from PyQt6.QtWidgets import QApplication, QMainWindow, QMessageBox
 from app.configuration import configuration
 from app.gui.icons import resources
 from app.gui import interface_signals
+from app.utils import sow_server
 from app.utils.ai_clients.local_server_manager import LocalServerManager
 from app.utils.discord_rpc import DiscordRPCManager
 from app.gui.sowInterface import Ui_MainWindow
@@ -590,17 +590,11 @@ class MainWindow(QMainWindow):
 
         gpu_info = self.translations.get("no_gpu", "No GPU")
         
-        if torch.cuda.is_available():
-            try:
-                gpu_name = torch.cuda.get_device_name(0)
-                gpu_properties = torch.cuda.get_device_properties(0)
-
-                total_vram_gb = round(gpu_properties.total_memory / (1024 ** 3), 2) 
-                
-                gpu_info = f"{gpu_name} - {total_vram_gb} GB VRAM"
-                
-            except Exception as e:
-                gpu_info = f"GPU detected, but info error: {str(e)}"
+        # Local models run on the Soul of Waifu server: show its GPU when it has one.
+        server_gpu = sow_server.gpu_info()
+        if server_gpu:
+            total_vram_gb = round(server_gpu["vram_total_mb"] / 1024, 2)
+            gpu_info = f"{server_gpu['name']} - {total_vram_gb} GB VRAM"
         else:
             try:
                 gpus = GPUtil.getGPUs()

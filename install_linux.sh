@@ -35,7 +35,7 @@ pipi pypresence
 pipi pyautogui playwright
 pipi sentence-transformers==5.1.0
 pipi openai==1.70.0 mistralai==1.5.0
-pipi edge-tts==7.2.7 elevenlabs==1.52.0 kokoro==0.9.4
+pipi edge-tts==7.3.1 elevenlabs==1.52.0 kokoro==0.9.4
 pipi qwen-tts
 pipi faster-whisper
 pipi curl_cffi

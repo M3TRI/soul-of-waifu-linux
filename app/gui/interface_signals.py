@@ -20,7 +20,6 @@ import urllib.request
 from pathlib import Path
 
 import yaml
-import torch
 import aiohttp
 import asyncio
 import tiktoken
@@ -30,7 +29,6 @@ from socketserver import TCPServer
 from PIL import Image, PngImagePlugin
 from qasync import asyncSlot
 from http.server import SimpleHTTPRequestHandler
-from transformers import AutoTokenizer, AutoModelForSequenceClassification
 
 from PyQt6 import QtCore, QtGui, QtWidgets
 from PyQt6.QtWebEngineWidgets import QWebEngineView
@@ -46,6 +44,7 @@ from PyQt6.QtWidgets import (
 
 from app.gui.character_ai_assistant import CharacterAIAssistantDialog
 from app.utils.discord_rpc import DiscordRPCManager
+from app.utils import sow_server
 from app.utils.ai_clients.local_server_manager import LocalServerManager
 from app.utils.ai_clients.local_endpoint import LocalEndpointConfig, BUILTIN_PORT
 from app.utils.ai_clients.prompt_engine import (
@@ -64,7 +63,7 @@ from app.utils.ai_clients.soul_stage_engine import (
 from app.utils.vrm_server import VRMServerThread
 
 from app.gui.custom_widgets import PersonasEditorDialog, SystemPromptEditorDialog, DiscordGatewayDialog, LorebookEditorDialog, AuthorNotesEditorDialog, SummaryEditorDialog, ImageGenSettingsDialog
-from app.gui.custom_widgets import SLIDER_STYLE_DARK
+from app.gui.custom_widgets import SLIDER_STYLE_DARK, show_window
 from app.gui.custom_widgets import (
     Live2DWidget, AnimatedHoverButton, TextEditUserMessage, SmoothMessageFrame, TypingIndicatorWidget,
     CharacterCardCharactersGateway, SceneGatewayCard, LorebookGatewayCard, CharacterCardList, CharacterFolderCard, MethodCard, ModelListItemWidget,
@@ -2350,7 +2349,7 @@ class InterfaceSignals():
         layout.addWidget(title)
         layout.addWidget(text_edit)
         
-        dialog.exec()
+        show_window(dialog)
 
     def on_tts_audio_ready(self, audio_b64: str):
         if hasattr(self, 'web_bridge') and self.web_bridge:
@@ -3012,7 +3011,7 @@ class InterfaceSignals():
     
     def set_about_program_button(self):
         dialog = AboutDialog(parent=self.main_window, translations=self.translations)
-        dialog.exec()
+        show_window(dialog, "about")
 
     def on_pushButton_main_clicked(self):
         asyncio.create_task(self.set_main_tab())
@@ -3213,19 +3212,19 @@ class InterfaceSignals():
 
     def open_personas_editor(self):
         dialog = PersonasEditorDialog(self.translations, self.configuration_settings, self.main_window, parent=self.main_window)
-        dialog.exec()
+        show_window(dialog, "personas_editor")
 
     def open_system_prompt_editor(self):
         dialog = SystemPromptEditorDialog(self.translations, self.configuration_settings, self.main_window, parent=self.main_window)
-        dialog.exec()
+        show_window(dialog, "system_prompt_editor")
 
     def open_discord_gateway(self):
         dialog = DiscordGatewayDialog(self.translations, self.configuration_api, self.main_window, parent=self.main_window)
-        dialog.exec()
+        show_window(dialog, "discord_gateway")
 
     def open_lorebook_editor(self):
         dialog = LorebookEditorDialog(self.translations, self.configuration_settings, self.main_window, parent=self.main_window)
-        dialog.exec()
+        show_window(dialog, "lorebook_editor")
 
     def open_author_notes_editor(self):
         character_name = getattr(self, "current_active_character", None) or None
@@ -3235,15 +3234,15 @@ class InterfaceSignals():
             character_name=character_name,
             configuration_characters=self.configuration_characters if character_name else None,
         )
-        dialog.exec()
+        show_window(dialog, "author_notes_editor")
 
     def open_summary_editor(self, character_name, conversation_method):
         dialog = SummaryEditorDialog(self.translations, self.configuration_characters, self.configuration_settings, character_name, conversation_method, self.main_window, parent=self.main_window)
-        dialog.exec()
+        show_window(dialog, "summary_editor")
 
     def open_chat_background_changer(self):
         dialog = BackgroundChangerWindow(ui=self.ui, translation=self.translations)
-        dialog.exec()
+        show_window(dialog, "chat_background")
 
     def add_character_sync(self):
         task = asyncio.create_task(self.add_character())
@@ -4149,7 +4148,7 @@ class InterfaceSignals():
                                 btn_preview_tr=self.translations.get("soul_memory_btn_preview"),
                                 **self._soul_memory_viewer_tr_overrides(char_name)
                             )
-        dialog.exec()
+        show_window(dialog, "ss_memory")
     
     def _ss_open_inventory_panel(self):
         if not self.soul_stage_session:
@@ -4168,7 +4167,7 @@ class InterfaceSignals():
 
         panel.item_used.connect(on_item_used)
         panel.item_dropped.connect(on_item_dropped)
-        panel.exec()
+        show_window(panel)
     
     def _ss_promote_npc_to_companion(self, npc_name: str):
         if not self.soul_stage_session or not npc_name:
@@ -4275,7 +4274,7 @@ class InterfaceSignals():
             npc_registry = orch.npc_registry,
             parent       = self.main_window,
         )
-        dlg.exec()
+        show_window(dlg, "ss_world_info")
         if self._soul_stage_scene_id:
             from app.gui.soul_stage_page import _load_scenes, _save_scenes
             d = _load_scenes()
@@ -5522,7 +5521,7 @@ class InterfaceSignals():
             return removed
 
         dialog = ChronicleDialog(ws, translations=self.translations, on_delete=on_delete, parent=self.main_window)
-        dialog.exec()
+        show_window(dialog, "ss_chronicle")
 
     def _ss_persist_world_state(self):
         if not self._soul_stage_scene_id:
@@ -7636,7 +7635,7 @@ class InterfaceSignals():
 
         workspace_layout.addWidget(stacked_widget)
         main_layout.addWidget(workspace, 1)
-        dialog.exec()
+        show_window(dialog, ("main_character_info", character_name))
 
     def save_changes_main_menu(self, conversation_method, character_name, name_edit, description_edit, personality_edit, scenario_edit, first_message_edit, example_messages_edit, alternate_greetings_edit, creator_notes_edit):
         """
@@ -11566,7 +11565,7 @@ class InterfaceSignals():
         )
         
         self.assistant_dialog.character_generated.connect(self._apply_ai_generated_character)
-        self.assistant_dialog.exec()
+        show_window(self.assistant_dialog, "ai_character_assistant")
 
     def _apply_ai_generated_character(self, data: dict, mode: str):
         field_map = {
@@ -11624,7 +11623,7 @@ class InterfaceSignals():
         """
         current_conversation_method = self.configuration_characters.get_character_data(character_name, "conversation_method")
         dialog = self.create_voice_dialog(current_conversation_method, character_name)
-        dialog.exec()
+        show_window(dialog, ("voice_menu", character_name))
 
     def create_voice_dialog(self, conversation_method, character_name):
         _BORDER   = "rgba(255, 255, 255, 0.08)"
@@ -13490,7 +13489,7 @@ class InterfaceSignals():
             self.configuration_characters.save_configuration_edit(configuration_data)
 
         dialog = self.create_expressions_dialog(character_name)
-        dialog.exec()
+        show_window(dialog, ("expressions_menu", character_name))
 
     def create_expressions_dialog(self, character_name):
         """
@@ -13953,7 +13952,7 @@ class InterfaceSignals():
                 sow_toast(None, "Error", "Please select a valid Live2D model folder first.", "error")
                 return
             dlg = Live2DMotionLinkerDialog(character_name, selected_folder, self.translations, parent=self.main_window)
-            dlg.exec()
+            show_window(dlg, ("live2d_motions", character_name))
 
         btn_map_motions.clicked.connect(open_motion_mapper_dialog)
         layout.addWidget(btn_map_motions)
@@ -15586,7 +15585,7 @@ class InterfaceSignals():
         nav_list.setCurrentRow(0)
 
         main_layout.addWidget(workspace, 1)
-        dialog.exec()
+        show_window(dialog, ("character_info", character_name))
     
     async def load_shared_lorebooks(self, filter_text=""):
         self.clear_scroll_area(self.ui.scrollArea_lorebooks)
@@ -16010,12 +16009,13 @@ class InterfaceSignals():
         has_gpu = False
         gpu_vram_gb = 0
         
+        # Local models run on the server, so its GPU is the one that matters.
         try:
-            if torch.cuda.is_available():
+            gpu = sow_server.gpu_info()
+            if gpu:
                 has_gpu = True
-                gpu_vram_bytes = torch.cuda.get_device_properties(0).total_memory
-                gpu_vram_gb = gpu_vram_bytes / (1024**3)
-        except:
+                gpu_vram_gb = gpu["vram_total_mb"] / 1024
+        except Exception:
             pass
         
         self.recommendations_worker = ModelRecommendations(
@@ -17849,7 +17849,7 @@ class InterfaceSignals():
                                 btn_preview_tr=self.translations.get("soul_memory_btn_preview"),
                                 **self._soul_memory_viewer_tr_overrides(char_name)
                             )
-        dialog.exec()
+        show_window(dialog, ("soul_memory", char_name))
 
     def open_more_button(self, conversation_method, character_name, character_avatar):
         _BG       = "#070709"
@@ -18213,7 +18213,7 @@ class InterfaceSignals():
         nav_list.setCurrentRow(0)
 
         main_layout.addWidget(workspace, 1)
-        dialog.exec()
+        show_window(dialog, ("more_menu", character_name))
 
     def clear_mode(self, character_name, conversation_method):
         """
@@ -19506,7 +19506,7 @@ class InterfaceSignals():
                     lbl.setPixmap(full_scaled)
                     lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
                     l.addWidget(lbl)
-                    dlg.exec()
+                    show_window(dlg)
 
                 thumb.mousePressEvent = show_full
                 return thumb
@@ -19888,7 +19888,7 @@ class InterfaceSignals():
                         lbl.setPixmap(full_scaled)
                         lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
                         l.addWidget(lbl)
-                        dlg.exec()
+                        show_window(dlg)
                         
                     img_label.mousePressEvent = show_full_image
                     self._attach_generated_image_context_menu(img_label, character_name, message_id, img_full_path)
@@ -21937,21 +21937,12 @@ Image prompt:"""
         if current_sow_system_mode == "Nothing":
             return
 
-        if self.tokenizer is None or self.model is None:
-            def _load_model():
-                tokenizer_path = os.path.join("app", "utils", "emotions", "detector")
-                tokenizer = AutoTokenizer.from_pretrained(tokenizer_path)
-                model = AutoModelForSequenceClassification.from_pretrained(tokenizer_path)
-                return tokenizer, model
-            self.tokenizer, self.model = await asyncio.to_thread(_load_model)
-
-        def _run_inference():
-            inputs = self.tokenizer(text, return_tensors="pt", truncation=True, padding=True)
-            with torch.no_grad():
-                outputs = self.model(**inputs)
-            return torch.argmax(outputs.logits, dim=1).item()
-
-        predicted_class_id = await asyncio.to_thread(_run_inference)
+        # The go-emotions detector runs on the Soul of Waifu server; neutral while it is offline.
+        try:
+            predicted_class_id = (await sow_server.emotions([text]))[0]["id"]
+        except Exception as e:
+            logger.warning(f"Emotion detection on the server failed: {e}")
+            predicted_class_id = 19  # "neutral"
 
         emotions = [
             "admiration", "amusement", "anger", "annoyance", "approval", "caring", "confusion", "curiosity",
@@ -22154,5 +22145,5 @@ Image prompt:"""
         Opens a dialog for configuring AI Image Generation settings.
         """
         dialog = ImageGenSettingsDialog(self.translations, self.configuration_settings, self.configuration_api, self.main_window, parent=self.main_window)
-        dialog.exec()
+        show_window(dialog, "image_gen_settings")
 

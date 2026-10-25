@@ -1,0 +1,8 @@
+# Vulkan llama.cpp on any GPU with a Mesa or NVIDIA Vulkan driver: only /dev/dri is passed.
+# The speech service stays on the CPU.
+services:
+  llama:
+    devices:
+      - /dev/dri:/dev/dri
+    group_add:
+      - "${SOW_RENDER_GID:-video}"

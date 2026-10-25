@@ -4,7 +4,6 @@ import json
 import yaml
 import uuid
 import time
-import torch
 import asyncio
 import logging
 import threading
@@ -14,7 +13,6 @@ import live2d.v3 as live2d
 
 from socketserver import TCPServer
 from http.server import SimpleHTTPRequestHandler
-from transformers import AutoTokenizer, AutoModelForSequenceClassification
 
 from PyQt6 import QtCore, QtGui, QtWidgets
 from PyQt6.QtOpenGLWidgets import QOpenGLWidget
@@ -41,6 +39,7 @@ from app.utils.soul_companion.soul_companion import SoulCompanion
 from app.utils.translator import Translator
 from app.utils.text_to_speech import TTSWorker, PipelinedTTSWorker
 from app.utils.speech_to_text import AudioInputWorker, STTWorker
+from app.utils import sow_server
 from app.utils.vrm_server import VRMServerThread
 from app.utils.discord_rpc import DiscordRPCManager
 from app.gui.custom_widgets import sow_toast, safe_paint
@@ -1621,19 +1620,12 @@ class Soul_Of_Waifu_System(QtCore.QObject):
         if current_sow_system_mode == "Nothing":
             return
 
-        if self.tokenizer is None or self.session is None:
-            tokenizer_path = os.path.join("app", "utils", "emotions", "detector")
-            self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_path)
-            model_path = os.path.join("app", "utils", "emotions", "detector")
-            self.session = AutoModelForSequenceClassification.from_pretrained(model_path)
-
-        inputs = self.tokenizer(text, return_tensors="pt", truncation=True, padding=True)
-
-        with torch.no_grad():
-            outputs = self.session(**inputs)
-
-        logits = outputs.logits
-        predicted_class_id = torch.argmax(logits, dim=1).item()
+        # The go-emotions detector runs on the Soul of Waifu server; neutral while it is offline.
+        try:
+            predicted_class_id = (await sow_server.emotions([text]))[0]["id"]
+        except Exception as e:
+            logger.warning(f"Emotion detection on the server failed: {e}")
+            predicted_class_id = 19  # "neutral"
         
         emotions = [
             "admiration", "amusement", "anger", "annoyance", "approval", "caring", "confusion", "curiosity",

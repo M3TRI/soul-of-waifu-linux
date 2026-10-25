@@ -5,64 +5,24 @@ import uuid
 import queue
 import time
 import shutil
-import torch
 import asyncio
 import logging
-import edge_tts
 import threading
-import contextlib
 import numpy as np
 import soundfile as sf
 import sounddevice as sd
 from typing import Optional
 
-from TTS.api import TTS
-from kokoro import KPipeline
 from pydub import AudioSegment
 from elevenlabs.client import AsyncElevenLabs
-from qwen_tts import Qwen3TTSModel
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
 from app.configuration import configuration
-from app.utils import audio_output
-from rvc_python.infer import RVCInference
-
-import torch.serialization
-try:
-    from fairseq.data.dictionary import Dictionary
-    torch.serialization.add_safe_globals([Dictionary])
-except ImportError:
-    pass
+from app.utils import audio_output, sow_server
 
 logger = logging.getLogger("Text-To-Speech Module")
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-CACHE_DIR = os.path.join(BASE_DIR, "app", "models", "hf_cache")
-
-os.environ["HF_HOME"] = CACHE_DIR
-os.environ["HUGGINGFACE_HUB_CACHE"] = CACHE_DIR
-
-os.makedirs(CACHE_DIR, exist_ok=True)
-
-def fix_rvc_sample_rate(file_path, base_file_path=None, target_sr=48000):
-    if not file_path or not os.path.exists(file_path):
-        return file_path
-    try:
-        data, sr = sf.read(file_path, dtype='float32')
-
-        if sr != target_sr:
-            if base_file_path and os.path.exists(base_file_path):
-                data_base, sr_base = sf.read(base_file_path, dtype='float32')
-                dur_base = len(data_base) / sr_base
-                if dur_base > 0:
-                    target_sr = int(round(len(data) / dur_base))
-
-            sf.write(file_path, data, target_sr)
-            logger.info(f"[RVC Fix] Corrected header from {sr} Hz to {target_sr} Hz")
-    except Exception as e:
-        logger.warning(f"Failed to fix RVC sample rate: {e}")
-    return file_path
 
 class ElevenLabs:
     def __init__(self):
@@ -137,198 +97,66 @@ class ElevenLabs:
         self.audio_cache = AudioSegment.empty()
 
 
-class XTTSv2_SOW_System:
+class _ServerEngine:
+    """
+    Base of the TTS engines that run on the Soul of Waifu server (server/speech). Each engine
+    reads the character config as the in-process engines did, sends the values with the
+    request, and writes the returned wav to the same local folder, so the workers, lip sync
+    and replay code are unchanged.
+    """
+    engine = ""
+    output_dir = ""
+    prefix = "output"
+
     def __init__(self):
         self.configuration_settings = configuration.ConfigurationSettings()
         self.configuration_api = configuration.ConfigurationAPI()
         self.configuration_characters = configuration.ConfigurationCharacters()
-
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        self.tts = None
-        self.tts_loaded = False
-        self.rvc = None
-        self.rvc_loaded = False
-
-    def _load_tts_sync(self):
-        if not self.tts_loaded:
-            try:
-                self.tts = TTS(model_name='tts_models/multilingual/multi-dataset/xtts_v2', progress_bar=True).to(self.device)
-                self.tts_loaded = True
-            except Exception as e:
-                raise RuntimeError(f"Failed to load TTS model: {e}")
-
-    async def _load_rvc(self, f0up_key, index_rate, protect):
-        if not self.rvc_loaded:
-            logger.info("Loading RVC model...")
-            try:
-                def _init():
-                    return RVCInference(
-                        models_dir="assets/rvc_models",
-                        device="cuda:0" if torch.cuda.is_available() else "cpu:0",
-                        f0up_key=f0up_key, index_rate=index_rate, protect=protect
-                    )
-                self.rvc = await asyncio.to_thread(_init)
-                self.rvc_loaded = True
-                logger.info("RVC model loaded successfully.")
-            except Exception as e:
-                logger.error(f"Error loading RVC model: {e}")
-                raise RuntimeError("Failed to load RVC model.")
-
-    async def generate_speech_with_xttsv2_sow_system(self, text=None, language=None, character_name=None):
-        await asyncio.to_thread(self._load_tts_sync)
-
-        configuration_data = self.configuration_characters.load_configuration()
-        char_config = configuration_data["character_list"][character_name]
-
-        xttsv2_voice_type = char_config["voice_type"]
-        xttsv2_rvc_enabled = char_config["rvc_enabled"]
-        xttsv2_rvc_file = char_config["rvc_file"]
-
-        speaker_wav_map = {
-            "Female Calm": "app/voices/calm_female.wav",
-            "Female": "app/voices/female.wav",
-            "Male": "app/voices/male.wav"
-        }
-        speaker_wav = speaker_wav_map.get(xttsv2_voice_type)
-        if not speaker_wav:
-            raise ValueError(f"Unknown voice type: {xttsv2_voice_type}")
-
-        os.makedirs("app/voices/xttsv2_audio", exist_ok=True)
-        unique_id = uuid.uuid4().hex
-        base_output_file = f"app/voices/xttsv2_audio/output_{unique_id}.wav"
-
-        await asyncio.to_thread(
-            self.tts.tts_to_file,
-            text=text,
-            speaker_wav=speaker_wav,
-            language=language,
-            file_path=base_output_file
-        )
-
-        if xttsv2_rvc_enabled and xttsv2_rvc_file:
-            f0up_key   = char_config.get("rvc_f0up_key",   0)
-            index_rate = char_config.get("rvc_index_rate", 0.75)
-            protect    = char_config.get("rvc_protect",    0.5)
-
-            await self._load_rvc(f0up_key, index_rate, protect)
-
-            model_name = os.path.splitext(os.path.basename(xttsv2_rvc_file))[0]
-            rvc_output_file = f"app/voices/xttsv2_audio/output_rvc_{unique_id}.wav"
-
-            rvc_params = (model_name, f0up_key, index_rate, protect)
-            if getattr(self, "_current_rvc_params", None) != rvc_params:
-                await asyncio.to_thread(self.rvc.load_model, model_name)
-                self._current_rvc_params = rvc_params
-
-            await asyncio.to_thread(self.rvc.infer_file, base_output_file, rvc_output_file)
-
-            fix_rvc_sample_rate(rvc_output_file, base_output_file)
-
-            try:
-                await asyncio.to_thread(os.remove, base_output_file)
-            except OSError as e:
-                logger.warning(f"Could not remove temp file {base_output_file}: {e}")
-
-            return rvc_output_file
-
-        return base_output_file
-
-
-class EdgeTTS:
-    def __init__(self):
-        self.configuration_settings = configuration.ConfigurationSettings()
-        self.configuration_api = configuration.ConfigurationAPI()
-        self.configuration_characters = configuration.ConfigurationCharacters()
-
-        self.rvc = None
-        self.rvc_loaded = False
-        self.output_dir = "app/voices/edge_tts_audio"
-        os.makedirs(self.output_dir, exist_ok=True)
         self.device_index = self.configuration_settings.get_main_setting("output_device_real_index")
+        self.tts_loaded = False
+        os.makedirs(self.output_dir, exist_ok=True)
 
-    async def _load_rvc(self, f0up_key, index_rate, protect):
-        if not self.rvc_loaded:
-            logger.info("Loading RVC model...")
-            try:
-                def _init():
-                    return RVCInference(
-                        models_dir="assets/rvc_models",
-                        device="cuda:0" if torch.cuda.is_available() else "cpu:0",
-                        f0up_key=f0up_key, index_rate=index_rate, protect=protect
-                    )
-                self.rvc = await asyncio.to_thread(_init)
-                self.rvc_loaded = True
-                logger.info("RVC model loaded successfully.")
-            except Exception as e:
-                logger.error(f"Error loading RVC model: {e}")
-                raise RuntimeError("Failed to load RVC model.")
-
-    async def _convert_mp3_to_wav(self, mp3_file, wav_file):
-        def _convert():
-            audio = AudioSegment.from_mp3(mp3_file)
-            audio.export(wav_file, format="wav")
-        await asyncio.to_thread(_convert)
-
-    async def _generate_base(self, text, character_name):
+    def _char_config(self, character_name):
         configuration_data = self.configuration_characters.load_configuration()
-        char_config = configuration_data["character_list"][character_name]
+        return configuration_data["character_list"][character_name]
 
-        voice_type = char_config["voice_type"]
-        rvc_enabled = char_config["rvc_enabled"]
-        rvc_file = char_config["rvc_file"]
-
-        unique_id = uuid.uuid4().hex
-        audio_file = os.path.join(self.output_dir, f"output_{unique_id}.mp3")
-        wav_file = os.path.join(self.output_dir, f"output_{unique_id}.wav")
-
-        try:
-            communicate = edge_tts.Communicate(text, voice_type)
-            await communicate.save(audio_file)
-        except Exception as e:
-            logger.error(f"Error when generating EdgeTTS audio: {e}")
+    async def _rvc_options(self, char_config):
+        rvc_file = char_config.get("rvc_file")
+        if not (char_config.get("rvc_enabled") and rvc_file):
             return None
+        if not os.path.isabs(rvc_file) and not os.path.exists(rvc_file):
+            rvc_file = os.path.join("assets", "rvc_models", rvc_file)
+        name = await sow_server.ensure_rvc_model(rvc_file)
+        return {
+            "model": name,
+            "f0up_key": char_config.get("rvc_f0up_key", 0),
+            "index_rate": char_config.get("rvc_index_rate", 0.75),
+            "protect": char_config.get("rvc_protect", 0.5),
+        }
 
+    async def _synthesize(self, text, voice, options):
         try:
-            await self._convert_mp3_to_wav(audio_file, wav_file)
-            await asyncio.to_thread(os.remove, audio_file)
-        except Exception as e:
-            logger.error(f"Error when converting MP3 to WAV: {e}")
-            return None
+            wav, _rate = await sow_server.speech(self.engine, text, voice, options)
+        except sow_server.ServerError as e:
+            if e.code == "out_of_vram":
+                raise RuntimeError(f"{self.engine} TTS: not enough video memory on the server ({e})") from e
+            raise RuntimeError(f"{self.engine} TTS on the server failed: {e}") from e
+        self.tts_loaded = True
+        output_file = os.path.join(self.output_dir, f"{self.prefix}_{uuid.uuid4().hex}.wav")
+        await asyncio.to_thread(self._write, output_file, wav)
+        return output_file
 
-        if rvc_enabled and rvc_file:
-            f0up_key   = char_config.get("rvc_f0up_key",   0)
-            index_rate = char_config.get("rvc_index_rate", 0.75)
-            protect    = char_config.get("rvc_protect",    0.5)
+    @staticmethod
+    def _write(path, data):
+        with open(path, "wb") as f:
+            f.write(data)
 
-            await self._load_rvc(f0up_key, index_rate, protect)
-            model_name = os.path.splitext(os.path.basename(rvc_file))[0]
-            rvc_output_file = os.path.join(self.output_dir, f"output_rvc_{unique_id}.wav")
-
-            rvc_params = (model_name, f0up_key, index_rate, protect)
-            if getattr(self, "_current_rvc_params", None) != rvc_params:
-                await asyncio.to_thread(self.rvc.load_model, model_name)
-                self._current_rvc_params = rvc_params
-
-            await asyncio.to_thread(self.rvc.infer_file, wav_file, rvc_output_file)
-
-            fix_rvc_sample_rate(rvc_output_file, wav_file)
-
-            try:
-                await asyncio.to_thread(os.remove, wav_file)
-            except OSError as e:
-                logger.warning(f"Could not remove temp file {wav_file}: {e}")
-
-            return rvc_output_file
-
-        return wav_file
-
-    async def generate_speech_with_edge_tts(self, text, character_name):
-        output_file = await self._generate_base(text, character_name)
-        if output_file:
-            await self.play_audio(file_path=output_file)
-
-    async def generate_speech_with_edge_tts_sow_system(self, text, character_name):
-        return await self._generate_base(text, character_name)
+    async def _preload(self, voice="", options=None):
+        try:
+            await sow_server.preload_tts(self.engine, voice, options)
+            self.tts_loaded = True
+        except sow_server.ServerError as e:
+            raise RuntimeError(f"Failed to load {self.engine} TTS on the server: {e}") from e
 
     async def play_audio(self, file_path):
         def _play():
@@ -345,436 +173,111 @@ class EdgeTTS:
         sd.stop()
 
 
-class KokoroTTS_SOW_System:
-    def __init__(self):
-        self.configuration_settings = configuration.ConfigurationSettings()
-        self.configuration_api = configuration.ConfigurationAPI()
-        self.configuration_characters = configuration.ConfigurationCharacters()
+class XTTSv2_SOW_System(_ServerEngine):
+    engine = "xtts"
+    output_dir = "app/voices/xttsv2_audio"
 
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        self.pipeline = None
-        self.tts_loaded = False
-        self.rvc = None
-        self.rvc_loaded = False
-
-    async def _load_tts(self):
+    def _load_tts_sync(self):
         if not self.tts_loaded:
-            try:
-                def _init():
-                    return KPipeline(lang_code='a')
-                self.pipeline = await asyncio.to_thread(_init)
-                self.tts_loaded = True
-            except Exception as e:
-                raise RuntimeError(f"Failed to load TTS model: {e}")
+            sow_server.run_sync(self._preload("Female"))
 
-    async def _load_rvc(self, f0up_key, index_rate, protect):
-        if not self.rvc_loaded:
-            logger.info("Loading RVC model...")
-            try:
-                def _init():
-                    return RVCInference(
-                        models_dir="assets/rvc_models",
-                        device="cuda:0" if torch.cuda.is_available() else "cpu:0",
-                        f0up_key=f0up_key, index_rate=index_rate, protect=protect
-                    )
-                self.rvc = await asyncio.to_thread(_init)
-                self.rvc_loaded = True
-                logger.info("RVC model loaded successfully.")
-            except Exception as e:
-                logger.error(f"Error loading RVC model: {e}")
-                raise RuntimeError("Failed to load RVC model.")
+    async def generate_speech_with_xttsv2_sow_system(self, text=None, language=None, character_name=None):
+        char_config = self._char_config(character_name)
+        options = {"language": language or "en", "rvc": await self._rvc_options(char_config)}
+        return await self._synthesize(text, char_config["voice_type"], options)
 
-    async def generate_speech_with_kokoro(self, text, character_name):
-        await self._load_tts()
 
-        configuration_data = self.configuration_characters.load_configuration()
-        char_config = configuration_data["character_list"][character_name]
-        kokoro_voice_name = char_config["voice_type"]
-        kokoro_rvc_enabled = char_config["rvc_enabled"]
-        kokoro_rvc_file = char_config["rvc_file"]
+class EdgeTTS(_ServerEngine):
+    engine = "edge"
+    output_dir = "app/voices/edge_tts_audio"
 
-        def _generate():
-            generator = self.pipeline(text, voice=kokoro_voice_name)
-            chunks = []
-            for _, _, audio in generator:
-                chunks.append(audio)
-            return chunks
-
-        all_audio = await asyncio.to_thread(_generate)
-
-        if not all_audio:
-            logger.warning("Kokoro generated empty audio for this chunk. Skipping.")
+    async def _generate_base(self, text, character_name):
+        char_config = self._char_config(character_name)
+        try:
+            options = {"rvc": await self._rvc_options(char_config)}
+            return await self._synthesize(text, char_config["voice_type"], options)
+        except Exception as e:
+            logger.error(f"Error when generating EdgeTTS audio: {e}")
             return None
 
-        full_audio = np.concatenate(all_audio)
-        os.makedirs("app/voices/kokoro_audio", exist_ok=True)
-        unique_id = uuid.uuid4().hex
-        base_output_file = f"app/voices/kokoro_audio/kokoro_output_{unique_id}.wav"
-        await asyncio.to_thread(sf.write, base_output_file, full_audio, 24000)
+    async def generate_speech_with_edge_tts(self, text, character_name):
+        output_file = await self._generate_base(text, character_name)
+        if output_file:
+            await self.play_audio(file_path=output_file)
 
-        if kokoro_rvc_enabled and kokoro_rvc_file:
-            f0up_key   = char_config.get("rvc_f0up_key",   0)
-            index_rate = char_config.get("rvc_index_rate", 0.75)
-            protect    = char_config.get("rvc_protect",    0.5)
-
-            await self._load_rvc(f0up_key, index_rate, protect)
-            model_name = os.path.splitext(os.path.basename(kokoro_rvc_file))[0]
-            rvc_output_file = f"app/voices/kokoro_audio/output_rvc_{unique_id}.wav"
-
-            rvc_params = (model_name, f0up_key, index_rate, protect)
-            if getattr(self, "_current_rvc_params", None) != rvc_params:
-                await asyncio.to_thread(self.rvc.load_model, model_name)
-                self._current_rvc_params = rvc_params
-
-            await asyncio.to_thread(self.rvc.infer_file, base_output_file, rvc_output_file)
-
-            fix_rvc_sample_rate(rvc_output_file, base_output_file)
-
-            try:
-                await asyncio.to_thread(os.remove, base_output_file)
-            except OSError as e:
-                logger.warning(f"Could not remove temp file {base_output_file}: {e}")
-
-            return rvc_output_file
-
-        return base_output_file
+    async def generate_speech_with_edge_tts_sow_system(self, text, character_name):
+        return await self._generate_base(text, character_name)
 
 
-class SileroTTS_SOW_System:
-    def __init__(self):
-        self.configuration_settings = configuration.ConfigurationSettings()
-        self.configuration_api = configuration.ConfigurationAPI()
-        self.configuration_characters = configuration.ConfigurationCharacters()
-
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        self.model = None
-        self.tts_loaded = False
-        self.rvc = None
-        self.rvc_loaded = False
+class KokoroTTS_SOW_System(_ServerEngine):
+    engine = "kokoro"
+    output_dir = "app/voices/kokoro_audio"
+    prefix = "kokoro_output"
 
     async def _load_tts(self):
         if not self.tts_loaded:
-            try:
-                self.model, _ = await asyncio.to_thread(
-                    torch.hub.load,
-                    repo_or_dir='snakers4/silero-models',
-                    model='silero_tts',
-                    language='ru',
-                    speaker='v5_3_ru',
-                    trust_repo=True,
-                    force_reload=False,
-                    verbose=True
-                )
-                self.model.to(self.device)
-                self.tts_loaded = True
-                logger.info("Silero TTS loaded successfully")
-            except Exception as e:
-                raise RuntimeError(f"Failed to load Silero TTS: {e}")
+            await self._preload("af_heart")
 
-    async def _load_rvc(self, f0up_key, index_rate, protect):
-        if not self.rvc_loaded:
-            logger.info("Loading RVC model...")
-            try:
-                def _init():
-                    return RVCInference(
-                        models_dir="assets/rvc_models",
-                        device="cuda:0" if torch.cuda.is_available() else "cpu:0",
-                        f0up_key=f0up_key, index_rate=index_rate, protect=protect
-                    )
-                self.rvc = await asyncio.to_thread(_init)
-                self.rvc_loaded = True
-                logger.info("RVC model loaded successfully.")
-            except Exception as e:
-                logger.error(f"Error loading RVC model: {e}")
-                raise RuntimeError("Failed to load RVC model.")
+    async def generate_speech_with_kokoro(self, text, character_name):
+        char_config = self._char_config(character_name)
+        options = {"rvc": await self._rvc_options(char_config)}
+        return await self._synthesize(text, char_config["voice_type"], options)
+
+
+class SileroTTS_SOW_System(_ServerEngine):
+    engine = "silero"
+    output_dir = "app/voices/silero_audio"
+    prefix = "silero_output"
+
+    async def _load_tts(self):
+        if not self.tts_loaded:
+            await self._preload("xenia")
 
     async def generate_speech_with_silero(self, text, character_name):
-        await self._load_tts()
+        char_config = self._char_config(character_name)
+        options = {"rvc": await self._rvc_options(char_config)}
+        return await self._synthesize(text, char_config.get("voice_type", "xenia"), options)
 
-        configuration_data = self.configuration_characters.load_configuration()
-        char_config = configuration_data["character_list"][character_name]
 
-        silero_voice = char_config.get("voice_type", "xenia")
-        silero_rvc_enabled = char_config.get("rvc_enabled", False)
-        silero_rvc_file = char_config.get("rvc_file")
+class Qwen3TTS_SOW_System(_ServerEngine):
+    engine = "qwen3"
+    output_dir = "app/voices/qwen_audio"
+    prefix = "qwen_output"
 
-        os.makedirs("app/voices/silero_audio", exist_ok=True)
-        unique_id = uuid.uuid4().hex
-        base_output_file = f"app/voices/silero_audio/silero_output_{unique_id}.wav"
-
-        audio = await asyncio.to_thread(
-            self.model.apply_tts,
-            text=text,
-            speaker=silero_voice,
-            sample_rate=48000
-        )
-        await asyncio.to_thread(sf.write, base_output_file, audio.cpu().numpy(), 48000)
-
-        if silero_rvc_enabled and silero_rvc_file:
-            f0up_key   = char_config.get("rvc_f0up_key",   0)
-            index_rate = char_config.get("rvc_index_rate", 0.75)
-            protect    = char_config.get("rvc_protect",    0.5)
-
-            await self._load_rvc(f0up_key, index_rate, protect)
-            model_name = os.path.splitext(os.path.basename(silero_rvc_file))[0]
-            rvc_output_file = f"app/voices/silero_audio/output_rvc_{unique_id}.wav"
-
-            rvc_params = (model_name, f0up_key, index_rate, protect)
-            if getattr(self, "_current_rvc_params", None) != rvc_params:
-                await asyncio.to_thread(self.rvc.load_model, model_name)
-                self._current_rvc_params = rvc_params
-            
-            await asyncio.to_thread(self.rvc.infer_file, base_output_file, rvc_output_file)
-
-            fix_rvc_sample_rate(rvc_output_file, base_output_file)
-
-            try:
-                await asyncio.to_thread(os.remove, base_output_file)
-            except OSError as e:
-                logger.warning(f"Could not remove temp file {base_output_file}: {e}")
-
-            return rvc_output_file
-
-        return base_output_file
-
-class Qwen3TTS_SOW_System:
     def __init__(self):
-        self.configuration_settings = configuration.ConfigurationSettings()
-        self.configuration_api = configuration.ConfigurationAPI()
-        self.configuration_characters = configuration.ConfigurationCharacters()
+        super().__init__()
+        self._refs = {}   # (path, mtime) -> id of the clip uploaded to the server
 
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        self.pipeline = None
-        self.tts_loaded = False
-        self.rvc = None
-        self.rvc_loaded = False
+    async def _qwen_options(self, char_config):
+        ref_path = char_config.get("qwen_cloning_ref_path", "")
+        ref = ""
+        if char_config.get("qwen_mode") == "cloning" and ref_path and os.path.exists(ref_path):
+            key = (ref_path, os.path.getmtime(ref_path))
+            if key not in self._refs:
+                self._refs[key] = await sow_server.upload_ref(ref_path)
+            ref = self._refs[key]
+        return {
+            "mode": char_config.get("qwen_mode", "presets"),
+            "model_size": char_config.get("qwen_model_size", "1.7B"),
+            "device": char_config.get("qwen_device", "cpu"),
+            "prompt": char_config.get("qwen_prompt", ""),
+            "style_instruct": char_config.get("qwen_style_instruct", ""),
+            "ref": ref,
+            "ref_text": char_config.get("qwen_cloning_ref_text", ""),
+            "language": char_config.get("qwen_language", "English"),
+        }
 
     async def _load_tts(self, character_name: str):
         if not self.tts_loaded:
-            try:
-                configuration_data = self.configuration_characters.load_configuration()
-                char_config = configuration_data["character_list"].get(character_name, {})
-
-                model_size = char_config.get("qwen_model_size", "1.7B")
-                qwen_mode = char_config.get("qwen_mode", "presets")
-                qwen_device = char_config.get("qwen_device", "cpu")
-
-                if qwen_device == "cuda" and torch.cuda.is_available():
-                    self.device = "cuda"
-                    target_dtype = torch.bfloat16
-                    # Whole model on the GPU. "auto" lets accelerate offload part of it to the CPU
-                    # when VRAM looks tight, and generation then fails on meta tensors.
-                    target_device_map = "cuda"
-                else:
-                    self.device = "cpu"
-                    target_dtype = torch.float32
-                    target_device_map = None
-
-                if qwen_mode == "prompt":
-                    variant = "VoiceDesign"
-                elif qwen_mode == "cloning":
-                    variant = "Base"
-                else:
-                    variant = "CustomVoice"
-
-                if variant == "VoiceDesign" and model_size != "1.7B":
-                    logger.warning(
-                        f"Qwen3-TTS: VoiceDesign is only available as 1.7B, "
-                        f"got model_size='{model_size}'. Falling back to 1.7B."
-                    )
-                    model_size = "1.7B"
-
-                model_name = f"Qwen/Qwen3-TTS-12Hz-{model_size}-{variant}"
-
-                def _init():
-                    model = Qwen3TTSModel.from_pretrained(
-                        model_name,
-                        dtype=target_dtype,
-                        device_map=target_device_map,
-                        attn_implementation="sdpa",
-                    )
-                    
-                    if target_dtype == torch.float32:
-                        def clean_and_cast_to_float32(obj, visited=None):
-                            if visited is None:
-                                visited = set()
-                            
-                            obj_id = id(obj)
-                            if obj_id in visited:
-                                return
-                            visited.add(obj_id)
-
-                            if isinstance(obj, torch.nn.Module):
-                                if hasattr(obj, "_hf_hook"):
-                                    try:
-                                        delattr(obj, "_hf_hook")
-                                    except Exception:
-                                        pass
-                                try:
-                                    obj.to(torch.float32)
-                                except Exception:
-                                    pass
-                                for child in obj.children():
-                                    clean_and_cast_to_float32(child, visited)
-                            
-                            elif hasattr(obj, "__dict__"):
-                                for attr_name, attr_val in list(obj.__dict__.items()):
-                                    if attr_name.startswith("__"):
-                                        continue
-                                    clean_and_cast_to_float32(attr_val, visited)
-                            
-                            elif isinstance(obj, (list, tuple)):
-                                for item in obj:
-                                    clean_and_cast_to_float32(item, visited)
-                                    
-                            elif isinstance(obj, dict):
-                                for value in obj.values():
-                                    clean_and_cast_to_float32(value, visited)
-
-                        clean_and_cast_to_float32(model)
-                            
-                    return model
-
-                self.model = await asyncio.to_thread(_init)
-                self.tts_loaded = True
-                
-                logger.info(f"Qwen3-TTS {model_size}-{variant} loaded on {self.device.upper()} for '{character_name}'")
-
-            except Exception as e:
-                logger.error(f"Failed to load Qwen3-TTS for {character_name}: {e}")
-                raise RuntimeError(f"Failed to load Qwen3-TTS: {e}")
-
-    async def _load_rvc(self, f0up_key, index_rate, protect):
-        if not self.rvc_loaded:
-            logger.info("Loading RVC model for Qwen 3...")
-            try:
-                def _init():
-                    return RVCInference(
-                        models_dir="assets/rvc_models",
-                        device="cuda:0" if torch.cuda.is_available() else "cpu:0",
-                        f0up_key=f0up_key, index_rate=index_rate, protect=protect
-                    )
-                self.rvc = await asyncio.to_thread(_init)
-                self.rvc_loaded = True
-                logger.info("RVC model loaded successfully.")
-            except Exception as e:
-                logger.error(f"Error loading RVC model: {e}")
-                raise RuntimeError("Failed to load RVC model.")
+            char_config = self._char_config(character_name)
+            await self._preload(char_config.get("voice_type", "Serena"),
+                                {"qwen": await self._qwen_options(char_config)})
 
     async def generate_speech_with_qwen3(self, text: str, character_name: str):
-        await self._load_tts(character_name)
+        char_config = self._char_config(character_name)
+        options = {"qwen": await self._qwen_options(char_config), "rvc": await self._rvc_options(char_config)}
+        return await self._synthesize(text, char_config.get("voice_type", "Serena"), options)
 
-        configuration_data = self.configuration_characters.load_configuration()
-        char_config = configuration_data["character_list"][character_name]
-
-        qwen_mode = char_config.get("qwen_mode", "presets")
-        voice_type = char_config.get("voice_type", "Serena")
-        qwen_prompt = char_config.get("qwen_prompt", "")
-        qwen_instruct = char_config.get("qwen_style_instruct", "")
-        qwen_ref_path = char_config.get("qwen_cloning_ref_path", "")
-        qwen_ref_text = char_config.get("qwen_cloning_ref_text", "")
-        language = char_config.get("qwen_language", "English")
-
-        qwen_rvc_enabled = char_config.get("rvc_enabled", False)
-        qwen_rvc_file = char_config.get("rvc_file")
-
-        os.makedirs("app/voices/qwen_audio", exist_ok=True)
-        unique_id = uuid.uuid4().hex
-        base_output_file = f"app/voices/qwen_audio/qwen_output_{unique_id}.wav"
-
-        def _generate():
-            try:
-                generation_params = {
-                    "text": text,
-                    "language": language,
-                    "max_new_tokens": 1500,
-                    "temperature": 0.7,
-                    "top_p": 0.9,
-                }
-
-                with torch.no_grad():
-                    if self.device == "cpu":
-                        autocast_ctx = torch.amp.autocast(device_type="cpu", enabled=False)
-                    else:
-                        autocast_ctx = contextlib.nullcontext()
-
-                    with autocast_ctx:
-                        if qwen_mode == "cloning" and qwen_ref_path and os.path.exists(qwen_ref_path):
-                            # Voice Cloning
-                            if qwen_ref_text:
-                                wavs, sr = self.model.generate_voice_clone(
-                                    ref_audio=qwen_ref_path,
-                                    ref_text=qwen_ref_text,
-                                    **generation_params
-                                )
-                            else:
-                                logger.warning(
-                                    f"Qwen3-TTS: no 'qwen_cloning_ref_text' set for "
-                                    f"'{character_name}'; using x_vector_only_mode "
-                                    f"(cloning quality may be reduced)."
-                                )
-                                wavs, sr = self.model.generate_voice_clone(
-                                    ref_audio=qwen_ref_path,
-                                    x_vector_only_mode=True,
-                                    **generation_params
-                                )
-
-                        elif qwen_mode == "prompt" and qwen_prompt:
-                            # Voice Design
-                            wavs, sr = self.model.generate_voice_design(
-                                instruct=qwen_prompt,
-                                **generation_params
-                            )
-
-                        else:
-                            # Preset Voices (CustomVoice)
-                            wavs, sr = self.model.generate_custom_voice(
-                                speaker=voice_type, instruct=qwen_instruct,
-                                **generation_params
-                            )
-
-                audio_data = wavs[0]
-                if isinstance(audio_data, torch.Tensor):
-                    audio_data = audio_data.detach().cpu().to(torch.float32).numpy()
-                elif isinstance(audio_data, np.ndarray):
-                    audio_data = audio_data.astype(np.float32)
-
-                sf.write(base_output_file, audio_data, sr)
-                return base_output_file
-
-            except Exception as e:
-                logger.error(f"Qwen3 TTS generation error: {e}")
-                raise
-
-        await asyncio.to_thread(_generate)
-
-        if qwen_rvc_enabled and qwen_rvc_file:
-            f0up_key = char_config.get("rvc_f0up_key", 0)
-            index_rate = char_config.get("rvc_index_rate", 0.75)
-            protect = char_config.get("rvc_protect", 0.5)
-
-            await self._load_rvc(f0up_key, index_rate, protect)
-
-            model_name = os.path.splitext(os.path.basename(qwen_rvc_file))[0]
-            rvc_output_file = f"app/voices/qwen_audio/output_rvc_{unique_id}.wav"
-
-            rvc_params = (model_name, f0up_key, index_rate, protect)
-            if getattr(self, "_current_rvc_params", None) != rvc_params:
-                await asyncio.to_thread(self.rvc.load_model, model_name)
-                self._current_rvc_params = rvc_params
-
-            await asyncio.to_thread(self.rvc.infer_file, base_output_file, rvc_output_file)
-
-            fix_rvc_sample_rate(rvc_output_file, base_output_file)
-
-            try:
-                os.remove(base_output_file)
-            except OSError:
-                pass
-
-            return rvc_output_file
-
-        return base_output_file
 
 class AudioPlaybackWorker(QThread):
     queue_empty_signal = pyqtSignal()

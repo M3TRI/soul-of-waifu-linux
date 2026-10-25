@@ -8,6 +8,57 @@ Debian, Ubuntu and their derivatives (EndeavourOS, Manjaro, CachyOS, Linux Mint,
 Pop!_OS, ...) and comes with a local LLM out of the box. The installer sets up llama.cpp and a model, and the app talks to it over the
 OpenAI-compatible API.
 
+## Server + app edition (branch `docker-split`, testing)
+
+This branch splits the program in two:
+
+- **Server** (Docker containers): the language model (llama.cpp), all voice engines (Kokoro,
+  Silero, Edge, XTTSv2, Qwen3-TTS, RVC), speech recognition (Whisper), memory embeddings and
+  emotion detection. It needs the GPU; nothing of it is installed into the system itself.
+- **App**: the window, Live2D/VRM, microphone and speakers, characters and chats. No torch or
+  CUDA (about 1.5 GB instead of 11 GB). It talks to the server by address and token, so one
+  server can serve several computers in the local network.
+
+### Install with one command
+
+```bash
+curl -fsSL https://gitlab.projectmiku.cc/opensrc/soul-of-waifu-linux/-/raw/docker-split/install.sh | bash
+```
+
+The installer takes no arguments: it asks for the language, shows a summary of your hardware
+and system, explains every step and asks before anything that changes the system (packages,
+Docker, NVIDIA Container Toolkit). It never installs GPU drivers and never adds you to the
+`docker` group. Choose one of three modes:
+
+1. **Everything on this computer** - server + app. You can allow other devices in the local
+   network to connect.
+2. **Only the server** - for other computers; it prints a pairing string at the end.
+3. **Only the app** - connects to an existing server with that pairing string.
+
+The model list only offers models that fit into your video memory next to the voice engines
+you pick.
+
+**Pairing string** - `sow://host:port#token=...&fp=...`. Show it again on the server with
+`sow-server pair`. The connection is encrypted (the server's own certificate, pinned by its
+fingerprint) and protected by the token: share the string only with your own devices. Do not
+open the port to the internet; use a VPN for access from outside.
+
+### Commands
+
+| Command | |
+|---|---|
+| `soul-of-waifu` | start the app (also in the application menu) |
+| `sow-server status` / `start` / `stop` / `restart` | server containers |
+| `sow-server logs [speech\|llama\|gateway]` | server logs |
+| `sow-server pair` | pairing string for another device |
+| `sow-server update` | rebuild and restart after `git pull` |
+
+Re-run the installer to change the voice profile, the model or network access. Files:
+app in `~/.local/share/soul-of-waifu/app`, server data in `~/.local/share/soul-of-waifu/server`,
+server settings in `~/.config/soul-of-waifu/server.env`.
+
+The rest of this README describes the all-in-one desktop build from `main`.
+
 ## Install
 
 Requirements: x86-64, Arch Linux, Debian 12+ / Ubuntu 22.04+ or a derivative, about 20 GB

@@ -1,0 +1,57 @@
+# Soul of Waifu server stack. Settings come from .env next to this file (written by the
+# installer); the GPU variant is chosen by adding compose.nvidia.yaml or compose.vulkan.yaml
+# through COMPOSE_FILE in .env. Only the gateway publishes a port.
+name: soul-of-waifu
+
+services:
+  gateway:
+    build:
+      context: ..
+      dockerfile: server/gateway/Dockerfile
+    image: sow-gateway:${SOW_VERSION:-dev}
+    restart: unless-stopped
+    user: "${SOW_UID:-1000}:${SOW_GID:-1000}"
+    environment:
+      SOW_TOKEN: ${SOW_TOKEN:?SOW_TOKEN is not set}
+      SOW_TLS_CERT: ${SOW_TLS_CERT:-}
+      SOW_TLS_KEY: ${SOW_TLS_KEY:-}
+      SOW_SERVER_VERSION: ${SOW_VERSION:-dev}
+    ports:
+      - "${SOW_BIND:-127.0.0.1}:${SOW_PORT:-8765}:8765"
+    volumes:
+      - ${SOW_MODELS_DIR:?SOW_MODELS_DIR is not set}:/models
+      - ${SOW_TLS_DIR:-./tls}:/tls:ro
+    depends_on:
+      - llama
+      - speech
+
+  llama:
+    image: ghcr.io/ggml-org/llama.cpp:${LLAMA_IMAGE_TAG:-server}
+    restart: unless-stopped
+    # Router mode: models in /models are loaded on demand and swapped through the API;
+    # llama-router.sh restarts the server when model files are added or removed.
+    entrypoint: ["/bin/sh", "/opt/sow/llama-router.sh"]
+    command: --models-dir /models --models-max 1 --host 0.0.0.0 --port 8080 ${LLAMA_ARGS:-}
+    volumes:
+      - ${SOW_MODELS_DIR}:/models:ro
+      - ./llama-router.sh:/opt/sow/llama-router.sh:ro
+
+  speech:
+    build:
+      context: ..
+      dockerfile: server/speech/Dockerfile
+      args:
+        TORCH: ${SOW_TORCH:-cpu}
+    image: sow-speech:${SOW_VERSION:-dev}-${SOW_TORCH:-cpu}
+    restart: unless-stopped
+    user: "${SOW_UID:-1000}:${SOW_GID:-1000}"
+    environment:
+      # Runs as the host user, who has no /etc/passwd entry in the image; torch asks for the
+      # user name (getpass) and fails without these.
+      HOME: /data
+      USER: sow
+      LOGNAME: sow
+      SOW_SPEECH_VRAM_MB: ${SOW_SPEECH_VRAM_MB:-0}
+      COQUI_TOS_AGREED: ${COQUI_TOS_AGREED:-0}
+    volumes:
+      - ${SOW_SPEECH_DATA_DIR:?SOW_SPEECH_DATA_DIR is not set}:/data

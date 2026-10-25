@@ -1,90 +1,52 @@
-import gc
 import logging
-import threading
-from pathlib import Path
 from typing import Optional
+
+import numpy as np
+
+from app.utils import sow_server
 
 logger = logging.getLogger("EmbeddingProvider")
 
 MODEL_NAME = "e5-small-en-ru"
 
-_model = None
-_failed: bool = False
-_available: Optional[bool] = None
-_lock = threading.Lock()
 
-def _check_available() -> bool:
-    global _available
-    if _available is None:
-        try:
-            import sentence_transformers
-            _available = True
-        except ImportError:
-            _available = False
-            logger.warning(
-                "[EmbeddingProvider] sentence-transformers not found. "
-                "All semantic features (Soul Memory RAG, TopicRAG, "
-                "NPC memory) will switch to a simplified fallback. "
-                "Installation: pip install sentence-transformers"
-            )
-    return _available
+class RemoteEmbedder:
+    """
+    Stand-in for SentenceTransformer(e5-small-en-ru): the model runs on the Soul of Waifu
+    server (/v1/embeddings). encode() keeps sentence-transformers' shapes: a string gives one
+    vector, a list gives one row per item. Callers add the e5 "query: "/"passage: " prefixes.
+    """
 
-def get_embedder(device: str = "cpu"):
-    global _model, _failed
+    def encode(self, sentences, convert_to_numpy: bool = True, **_kwargs) -> np.ndarray:
+        single = isinstance(sentences, str)
+        texts = [sentences] if single else list(sentences)
+        if not texts:
+            return np.zeros((0, 0), dtype=np.float32)
+        vecs = sow_server.embed(texts)
+        return vecs[0] if single else vecs
 
-    if _model is not None or _failed or not _check_available():
-        return _model
 
-    with _lock:
-        if _model is None and not _failed:
-            try:
-                from sentence_transformers import SentenceTransformer
+_embedder = RemoteEmbedder()
 
-                project_root = Path(__file__).resolve().parent.parent.parent
-                local_path = project_root / "app" / "utils" / MODEL_NAME
-                model_target = str(local_path) if local_path.exists() else MODEL_NAME
 
-                logger.info(
-                    f"[EmbeddingProvider] Loading embedding model on "
-                    f"{device.upper()} from '{model_target}'..."
-                )
-                _model = SentenceTransformer(model_target, device=device)
-                logger.info(
-                    f"[EmbeddingProvider] Embedding model successfully loaded on {device.upper()}"
-                )
+def get_embedder(device: str = "cpu") -> Optional[RemoteEmbedder]:
+    """
+    The embedder, or None while the server is unreachable or has no embedding model; callers
+    then use their simplified non-semantic fallback, as they did without sentence-transformers.
+    """
+    caps = sow_server.capabilities()
+    if not caps or not caps.get("embeddings", {}).get("available"):
+        return None
+    return _embedder
 
-            except Exception as e:
-                logger.error(
-                    f"[EmbeddingProvider] Failed to load embedding model: {e}",
-                    exc_info=True,
-                )
-                _model = None
-                _failed = True
-
-    return _model
 
 def is_loaded() -> bool:
-    return _model is not None
+    return get_embedder() is not None
+
 
 def reset_failure_state() -> None:
-    global _failed
-    with _lock:
-        _failed = False
+    sow_server.reset()
+
 
 def unload() -> None:
-    global _model, _failed
-    with _lock:
-        if _model is not None:
-            del _model
-            _model = None
-            _failed = False
-            gc.collect()
-
-            try:
-                import torch
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
-            except ImportError:
-                pass
-
-            logger.info("[EmbeddingProvider] Embedding model unloaded from memory")
+    """Nothing to free here: the model lives on the server."""
