@@ -55,10 +55,11 @@ ask_yn() {
     while true; do
         printf '%s?%s %s %s ' "$C_BOLD$C_YELLOW" "$C_RESET" "$question" "$hint"
         read_tty answer
-        answer=$(printf '%s' "$answer" | tr '[:upper:]' '[:lower:]')
+        answer=${answer//[[:space:]]/}
+        # Listed explicitly: tr and ${,,} do not lowercase Cyrillic in every locale.
         case "${answer:-$default}" in
-            y|yes|д|да) return 0 ;;
-            n|no|н|нет) return 1 ;;
+            y|Y|yes|Yes|YES|д|Д|да|Да|ДА) return 0 ;;
+            n|N|no|No|NO|н|Н|нет|Нет|НЕТ) return 1 ;;
         esac
     done
 }
